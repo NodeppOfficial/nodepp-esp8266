@@ -4,7 +4,7 @@
  * Licensed under the MIT (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
- * https://github.com/NodeppOficial/nodepp/blob/main/LICENSE
+ * https://github.com/NodeppOfficial/nodepp/blob/main/LICENSE
  */
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -14,8 +14,10 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#if _KERNEL_ == NODEPP_KERNEL_ARDUINO
+#if   _KERNEL_ == NODEPP_KERNEL_ARDUINO
     #include "arduino/conio.h"
+#else
+    #error "This OS Does not support conio.h"
 #endif
 
 /*────────────────────────────────────────────────────────────────────────────*/

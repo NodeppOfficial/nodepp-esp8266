@@ -125,13 +125,12 @@ public:
 namespace nodepp { namespace https {
 
     inline tls_t server( function_t<void,https_t> cb, ssl_t* ssl=nullptr, agent_t* opt=nullptr ){
-        auto server = tls::server( ssl, opt ); auto clb = type::bind( cb );
-        server.onConnect([=]( ssocket_t raw ){ https_t cli = raw;
+        return tls_t([=]( https_t cli ){
 
             int c=0; while((c=cli.read_header())==1){ /*unused*/ }
-            if( c==0 ){ (*clb)(cli); return; }
+            if( c==0 ){ cb(cli); return; }
         
-        cli.close(); }); return server; 
+        cli.close(); }, ssl, opt );
     }
     
     /*─······································································─*/
@@ -149,8 +148,7 @@ namespace nodepp { namespace https {
         /*-------------------------*/ fetch->headers["Host"] = dip;
         string_t dir = uri.pathname + uri.search + uri.hash;
 
-        auto    skt = tls::client( &cert, &agent ); skt.onConnect([=]( ssocket_t raw ){ 
-        https_t cli = raw; 
+        auto skt = tls_t([=]( https_t cli ){
 
             cli.set_timeout( fetch->timeout ); cli.write_header( fetch, dir );
             int c=0; while((c=cli.read_header())==1){ /*unused*/ }
@@ -158,7 +156,7 @@ namespace nodepp { namespace https {
             if( c==0 ){ res(cli); return; } cli.close();
             rej(except_t("Could not connect to server"));
             
-        });
+        }, &cert, &agent );
 
         skt.onError([=]( except_t error ){ rej(error); });
         skt.connect( dip, uri.port );

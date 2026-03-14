@@ -16,7 +16,7 @@
 
 namespace nodepp { namespace process {
 
-    kernel_t& NODEPP_EV_LOOP(){ static kernel_t evloop; return evloop; }
+    kernel_t& NODEPP_EV_LOOP(){ thread_local static kernel_t evloop; return evloop; }
     
     /*─······································································─*/
 

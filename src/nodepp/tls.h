@@ -79,8 +79,6 @@ public:
           { onError.emit("tls listener is closed"); return; } 
         if( obj->state & STATE::TLS_STATE_USED )
           { onError.emit("tls listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
 
         if( obj->ctx.create_server()==-1 )
           { onError.emit("Error Initializing SSL context"); return; }
@@ -141,9 +139,6 @@ public:
           { onError.emit("tls listener is closed"); return; } 
         if( obj->state & STATE::TLS_STATE_USED )
           { onError.emit("tls listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
-
         if( obj->ctx.create_client()==-1 )
           { onError.emit("Error Initializing SSL context"); return; }
 

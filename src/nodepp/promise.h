@@ -14,6 +14,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#include "any.h"
 #include "expected.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -81,14 +82,14 @@ protected:
             self->obj->state = PROMISE_STATE::FINISHED;
             self->obj->state|= PROMISE_STATE::RESOLVED;
             self->obj->state|= PROMISE_STATE::CLOSED  ;
-        },[=]( V value ){
+        self->off(); },[=]( V value ){
             self->obj->value = value; /*-------------*/
             self->obj->rej_clb.emit(value); /*-------*/
             self->obj->fin_clb.emit(/*-*/); /*-------*/
             self->obj->state = PROMISE_STATE::FINISHED;
             self->obj->state|= PROMISE_STATE::REJECTED;
             self->obj->state|= PROMISE_STATE::CLOSED  ;
-        });
+        self->off(); });
 
     }
 
@@ -139,10 +140,12 @@ public:
 
     void close() const noexcept { off(); }
 
-    void off() const noexcept {
-        obj->state = PROMISE_STATE::CLOSED;
+    void   off() const noexcept {
+        obj->state |= PROMISE_STATE::CLOSED;
         process::clear( obj->tsk );
-        obj->node_clb.free();
+        obj->node_clb.clear();
+        obj->rej_clb .clear();
+        obj->fin_clb .clear();
     }
 
     /*─······································································─*/
@@ -288,3 +291,5 @@ namespace nodepp { namespace promise {
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

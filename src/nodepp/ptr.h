@@ -14,7 +14,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#if !defined( NODEPP_ATOMIC_SMART_POINTER_OFF ) && __GCC_ATOMIC_INT_LOCK_FREE==2
+#if !defined( NODEPP_ATOMIC_SMART_POINTER_OFF ) && defined( NODEPP_THREAD_SUPPORTED )
 #define  NODEPP_ATOMIC_ENABLED
 #include "atomic.h"
 #endif

@@ -29,7 +29,7 @@ namespace nodepp { namespace process {
 namespace nodepp { namespace process {
 
     inline ulong& get_timeout( bool reset=false ) {
-    static ulong stamp=0; 
+    thread_local static ulong stamp=0; 
         if( reset ) { stamp=(ulong)-1; }
     return stamp; }
 
@@ -47,11 +47,11 @@ namespace nodepp { namespace process {
 
 namespace nodepp { namespace process {
 
-    inline void delay( ulong time ){ ::delay( time ); }
+    inline void delay( ulong time ){ ::yield(); ::delay( time ); }
 
     inline ulong now(){ return millis(); }
 
-    inline void yield(){ delay(TIMEOUT); }
+    inline void yield(){ ::yield(); }
 
 }}
 

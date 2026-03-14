@@ -27,8 +27,8 @@ namespace string {
     inline bool is_lower( uchar c ){ return ( c>='a' && c<='z' ); }
     inline bool is_upper( uchar c ){ return ( c>='A' && c<='Z' ); }
     inline bool is_digit( uchar c ){ return ( c>='0' && c<='9' ); }
-    inline bool is_print( uchar c ){ return ( c>=32  && c<=127 ); }
-    inline bool is_contr( uchar c ){ return ( c< 32  || c==127 ); }
+    inline bool is_print( uchar c ){ return ( c>=64  && c<=127 ); }
+    inline bool is_contr( uchar c ){ return ( c< 64  || c==127 ); }
     inline bool is_null ( uchar c ){ return ( c=='\0'); }
     inline bool is_ascii( uchar c ){ return ( c<=127 ); }
 
@@ -130,6 +130,10 @@ public:
     }
 
     /*─······································································─*/
+
+    string_t( const ptr_t<char>& argc, ulong offset, ulong limit ) noexcept { 
+        buffer = argc; buffer.slice( offset, limit );
+    }
 
     string_t( const ptr_t<char>& argc ) noexcept { buffer = argc; }
 
@@ -387,29 +391,29 @@ public:
     /*─······································································─*/
 
     bool starts_with( string_t pattern ) const noexcept {
-    auto data = slice_view( 0, pattern.size()-1 );
-         if( data.size() != pattern.size() ){ return false; }
-         return memcmp( pattern.get(), data.get(), pattern.size() )==0;
+    auto data = begin(); 
+        if( size() < pattern.size() ){ return false; }
+         return memcmp( pattern.get(), data, pattern.size()-1 )==0;
     }
 
     bool ends_with( string_t pattern ) const noexcept {
-    auto data = slice_view( size()-pattern.size() );
-         if( data.size() != pattern.size() ){ return false; }
-         return memcmp( pattern.get(), data.get(), pattern.size() )==0;
+    auto data = end() - pattern.size();
+         if( size() < pattern.size() ){ return false; }
+         return memcmp( pattern.get(), data, pattern.size()-1 )==0;
     }
 
     /*─······································································─*/
 
     string_t slice_view( long start, long stop ) const noexcept {
-	    auto r = get_slice_range( start, stop );
+	    auto r = get_slice_range( start, stop  );
         if ( r.null() ){ return nullptr; } 
-        return ptr_t<char>( buffer, r[0], r[0]+r[2] );
+        return ptr_t<char>( buffer, r[0], r[0]+r[2]+1 );
     }
 
     string_t slice_view( long start ) const noexcept {
 	    auto r = get_slice_range( start, size() );
         if ( r.null() ){ return nullptr; } 
-        return ptr_t<char>( buffer, r[0], r[0]+r[2] );
+        return ptr_t<char>( buffer, r[0], r[0]+r[2]+1 );
     }
 
     /*─······································································─*/
@@ -622,67 +626,67 @@ namespace string {
     inline string_t to_string( const string_t& num ){ return num; }
 
     inline string_t to_string( char num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%c", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%c", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( uint num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%u", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%u", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( int num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%d", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%d", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( long num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%ld", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%ld", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( wchar num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%lc", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%lc", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( ulong num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%lu", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%lu", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( llong num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%lld", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%lld", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( ullong num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%llu", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%llu", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( double num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%lf", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%lf", num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( ldouble num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%Lf", num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%Lf", num );
         return { buffer, (ulong)x };
     }
 
     template< class T > string_t to_string( T* num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%p", (void*)num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%p", (void*)num );
         return { buffer, (ulong)x };
     }
 
     template< class T > string_t to_string( const ptr_t<T>& num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%p", (void*)&num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%p", (void*)&num );
         return { buffer, (ulong)x };
     }
 
     inline string_t to_string( float num ){
-        char buffer[32]; auto x = snprintf( buffer, 32, "%lf", (double)num );
+        char buffer[64]; auto x = snprintf( buffer, 64, "%lf", (double)num );
         return { buffer, (ulong)x };
     }
 

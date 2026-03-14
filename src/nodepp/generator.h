@@ -13,7 +13,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#if !defined(GENERATOR_FILE) && defined(NODEPP_FILE) && defined(NODEPP_GENERATOR)
+#if !defined(GENERATOR_FILE) && (defined(NODEPP_FILE)||defined(NODEPP_SERIAL)) && defined(NODEPP_GENERATOR)
     #define  GENERATOR_FILE
 namespace nodepp { namespace generator { namespace file {
 
@@ -67,6 +67,7 @@ namespace nodepp { namespace generator { namespace file {
     coBegin; state=0; pos=0; data.clear();
 
         coWait( _read(str) ==1 );
+            if( _read.state<=0 )
               { state = data.size(); coEnd; }
         str->set_borrow( _read.data );
 
@@ -161,7 +162,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _write1(&out,_read1.data)==1 );
                if( _write1.state<=0 )            { break;  }
                     inp.onData.emit( _read1.data );
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
 
             coEnd; coYield(2);
 
@@ -171,7 +172,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _write2(&inp,_read2.data)==1 );
                if( _write2.state<=0 )            { break;  }
                     out.onData.emit( _read2.data );
-            }       out.stop(); inp.stop();
+            }       out.close(); inp.close();
 
         coFinish }
 
@@ -196,7 +197,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _read(&inp) ==1 );
                if( _read.state <=0 ){ break;  }
                     inp.onData.emit(_read.data);
-            }       inp.stop();
+            }       inp.close();
 
         coFinish }
 
@@ -212,7 +213,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _write(&out,_read.data)==1 );
                if( _write.state<=0 ){ break;  }
                     inp.onData.emit(_read.data);
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
 
         coFinish }
 
@@ -238,7 +239,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _read(&inp,val)==1 );
                if( _read.state <=0 ){ break; }
                    inp.onData.emit(_read.data);
-            }      inp.stop();
+            }      inp.close();
         
         coFinish }
 
@@ -255,7 +256,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _write(&out,_read.data)==1 );
                if( _write.state <=0 ){ break; }
                     inp.onData.emit(_read.data);
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
         
         coFinish }
 
@@ -280,7 +281,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _read(&inp)==1 );
                if( _read.state<=0 ){ break;  }
                    inp.onData.emit(_read.data);
-            }      inp.stop();
+            }      inp.close();
         
         coFinish }
 
@@ -296,7 +297,7 @@ namespace nodepp { namespace generator { namespace stream {
            coWait( _write(&out,_read.data)==1 );
                if( _write.state<=0 ){ break;  }
                     inp.onData.emit(_read.data);
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
         
         coFinish }
 
@@ -334,7 +335,7 @@ namespace nodepp { namespace generator { namespace zlib {
            coWait( _write( &out, borrow )==1 );
                if( _write.state<=0 ){ break; }
                     inp.onData.emit( borrow );
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
 
         coFinish }
 
@@ -348,7 +349,7 @@ namespace nodepp { namespace generator { namespace zlib {
                if( _read.state<=0 ){ break; }
             borrow = zlb.update_inflate(_read.data);
                     inp.onData.emit( borrow );
-            }       inp.stop();
+            }       inp.close();
 
         coFinish }
 
@@ -376,7 +377,7 @@ namespace nodepp { namespace generator { namespace zlib {
            coWait( _write( &out, borrow )==1 );
                if( _write.state<=0 ){ break; }
                     inp.onData.emit( borrow );
-            }       inp.stop(); out.stop();
+            }       inp.close(); out.close();
         
         coFinish }
 
@@ -390,7 +391,7 @@ namespace nodepp { namespace generator { namespace zlib {
                if( _read.state<=0 ){ break; }
             borrow = zlb.update_deflate(_read.data);
                     inp.onData.emit( borrow );
-            }       inp.stop();
+            }       inp.close();
 
         coFinish }
 
