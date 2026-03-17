@@ -18,6 +18,7 @@
 #include "event.h"
 #include "promise.h"
 #include "generator.h"
+#include "arduino/stream.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

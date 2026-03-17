@@ -14,9 +14,13 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "any.h"
-#include "mutex.h"
-#include "worker.h"
+#if (_KERNEL_==NODEPP_KERNEL_ARDUINO) && defined( NODEPP_THREAD_SUPPORTED )
+    #include "any.h"
+    #include "mutex.h"
+    #include "worker.h"
+#else
+    #error "This OS Does not support channel.h"
+#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

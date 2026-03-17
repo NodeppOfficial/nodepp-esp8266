@@ -16,7 +16,7 @@
 
 namespace nodepp { namespace process {
 
-    kernel_t& NODEPP_EV_LOOP(){ static kernel_t evloop; return evloop; }
+    kernel_t& NODEPP_EV_LOOP(){ thread_local static kernel_t evloop; return evloop; }
     
     /*─······································································─*/
 
@@ -55,9 +55,7 @@ namespace nodepp { namespace process {
     inline void exit( int err=0 ){ 
         if( should_close() ) /*--------*/ { goto DONE; }
         *NODEPP_EV_LOOP().should_close() = true; clear(); 
-    DONE:; 
-        ::exit(err); 
-    }
+    DONE:; ::exit(err); }
 
 }}
 

@@ -57,10 +57,10 @@ protected:
 
     object_t get_data( const string_t& data ) const noexcept {
 
-        static ptr_t<regex_t> reg ({
-               regex_t( "[a-z]"   ),
-               regex_t( "[.]\\d+" ),
-               regex_t( "\\d+"    )
+        ptr_t<regex_t> reg ({
+              regex_t( "[a-z]"   ),
+              regex_t( "[.]\\d+" ),
+              regex_t( "\\d+"    )
         });
 
         ulong x=0; while( x < data.size() && data[x]==' ' ){ ++x; }
@@ -150,7 +150,7 @@ public: json_t() noexcept {}
             out.push('{');
 
             for( auto &item: obj.as<QUEUE>().data() ){
-                 out += regex::format("\"${0}\":",item.first.get());
+                 out += string::format("\"%s\":",item.first.get());
                  out += format( item.second ); out.push(',');
             }if( out[ out.size()-1 ] == ',' ){ out.pop(); }
 
@@ -184,11 +184,11 @@ public: json_t() noexcept {}
             case 0x000f: return string::to_string( obj.as<float>() );                            break;
             case 0x0010: return string::to_string( obj.as<double>() );                           break;
             case 0x0011: return string::to_string( obj.as<ldouble>() );                          break;
-            case 0x0012: return regex ::format("\"${0}\"",obj.as<string_t>().get());             break;
+            case 0x0012: return string::format   ("\"%s\"",obj.as<string_t>().get());            break;
 
             case 0xfA03: do { out.push('[');
              for( auto &x: obj.as<array_t<bool>>() )
-                { out += regex::format("\"${0}\",",x ? "true":"false" ); }
+                { out += string::format("\"%s\",",x ? "true":"false" ); }
              if ( out[ out.size()-1 ] == ',' ){ out.pop(); }
             out.push(']'); } while(0); break;
 
@@ -200,25 +200,25 @@ public: json_t() noexcept {}
 
             case 0xfA12: do { out.push('[');
              for( auto &x: obj.as<array_t<string_t>>() )
-                { out += regex::format("\"${0}\",", x.get() ); }
+                { out += string::format("\"%s\",", x.get() ); }
              if ( out[ out.size()-1 ] == ',' ){ out.pop(); }
             out.push(']'); } while(0); break;
 
-            case 0xfA01: return regex::format("[${0}]",obj.as<array_t<int>>()     .join().get()); break;
-            case 0xfA02: return regex::format("[${0}]",obj.as<array_t<uint>>()    .join().get()); break;
-            case 0xfA05: return regex::format("[${0}]",obj.as<array_t<long>>()    .join().get()); break;
-            case 0xfA06: return regex::format("[${0}]",obj.as<array_t<short>>()   .join().get()); break;
-            case 0xfA07: return regex::format("[${0}]",obj.as<array_t<uchar>>()   .join().get()); break;
-            case 0xfA08: return regex::format("[${0}]",obj.as<array_t<llong>>()   .join().get()); break;
-            case 0xfA09: return regex::format("[${0}]",obj.as<array_t<ulong>>()   .join().get()); break;
-            case 0xfA0a: return regex::format("[${0}]",obj.as<array_t<ushort>>()  .join().get()); break;
-            case 0xfA0b: return regex::format("[${0}]",obj.as<array_t<ullong>>()  .join().get()); break;
-            case 0xfA0c: return regex::format("[${0}]",obj.as<array_t<wchar_t>>() .join().get()); break;
-            case 0xfA0d: return regex::format("[${0}]",obj.as<array_t<char16_t>>().join().get()); break;
-            case 0xfA0e: return regex::format("[${0}]",obj.as<array_t<char32_t>>().join().get()); break;
-            case 0xfA0f: return regex::format("[${0}]",obj.as<array_t<float>>()   .join().get()); break;
-            case 0xfA10: return regex::format("[${0}]",obj.as<array_t<double>>()  .join().get()); break;
-            case 0xfA11: return regex::format("[${0}]",obj.as<array_t<ldouble>>() .join().get()); break;
+            case 0xfA01: return string::format("[%s]",obj.as<array_t<int>>()     .join().get()); break;
+            case 0xfA02: return string::format("[%s]",obj.as<array_t<uint>>()    .join().get()); break;
+            case 0xfA05: return string::format("[%s]",obj.as<array_t<long>>()    .join().get()); break;
+            case 0xfA06: return string::format("[%s]",obj.as<array_t<short>>()   .join().get()); break;
+            case 0xfA07: return string::format("[%s]",obj.as<array_t<uchar>>()   .join().get()); break;
+            case 0xfA08: return string::format("[%s]",obj.as<array_t<llong>>()   .join().get()); break;
+            case 0xfA09: return string::format("[%s]",obj.as<array_t<ulong>>()   .join().get()); break;
+            case 0xfA0a: return string::format("[%s]",obj.as<array_t<ushort>>()  .join().get()); break;
+            case 0xfA0b: return string::format("[%s]",obj.as<array_t<ullong>>()  .join().get()); break;
+            case 0xfA0c: return string::format("[%s]",obj.as<array_t<wchar_t>>() .join().get()); break;
+            case 0xfA0d: return string::format("[%s]",obj.as<array_t<char16_t>>().join().get()); break;
+            case 0xfA0e: return string::format("[%s]",obj.as<array_t<char32_t>>().join().get()); break;
+            case 0xfA0f: return string::format("[%s]",obj.as<array_t<float>>()   .join().get()); break;
+            case 0xfA10: return string::format("[%s]",obj.as<array_t<double>>()  .join().get()); break;
+            case 0xfA11: return string::format("[%s]",obj.as<array_t<ldouble>>() .join().get()); break;
 
             default: return "{}"; break;
         }

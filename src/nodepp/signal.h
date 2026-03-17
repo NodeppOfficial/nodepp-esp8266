@@ -26,17 +26,17 @@ namespace nodepp { namespace process {
 namespace signal {
 
     inline void start() {
-        ::signal( SIGFPE,  []( int param ){ onSIGERROR.emit(SIGFPE ); conio::log("SIGFPE: ");  console::log("Floating Point Exception"); onSIGEXIT .emit(); });
-        ::signal( SIGSEGV, []( int param ){ onSIGERROR.emit(SIGSEGV); conio::log("SIGSEGV: "); console::log("Segmentation Violation");   onSIGEXIT .emit(); });
-        ::signal( SIGILL,  []( int param ){ onSIGERROR.emit(SIGILL ); conio::log("SIGILL: ");  console::log("Illegal Instruction");      onSIGEXIT .emit(); });
-        ::signal( SIGTERM, []( int param ){ onSIGERROR.emit(SIGTERM); conio::log("SIGTERM: "); console::log("Process Terminated");       onSIGEXIT .emit(); });
-        ::signal( SIGINT,  []( int param ){ onSIGERROR.emit(SIGINT ); conio::log("SIGINT: ");  console::log("Signal Interrupt");         onSIGEXIT .emit(); });
+        ::signal( SIGFPE,  []( int param ){ onSIGERROR.emit(SIGFPE ); console::error("SIGFPE: Floating Point Exception"); onSIGEXIT .emit(); });
+        ::signal( SIGSEGV, []( int param ){ onSIGERROR.emit(SIGSEGV); console::error("SIGSEGV: Segmentation Violation");  onSIGEXIT .emit(); });
+        ::signal( SIGILL,  []( int param ){ onSIGERROR.emit(SIGILL ); console::error("SIGILL: Illegal Instruction");      onSIGEXIT .emit(); });
+        ::signal( SIGTERM, []( int param ){ onSIGERROR.emit(SIGTERM); console::error("SIGTERM: Process Terminated");      onSIGEXIT .emit(); });
+        ::signal( SIGINT,  []( int param ){ onSIGERROR.emit(SIGINT ); console::error("SIGINT: Signal Interrupt");         onSIGEXIT .emit(); });
     #ifdef SIGPIPE
-        ::signal( SIGPIPE, []( int param ){ onSIGERROR.emit(SIGPIPE); conio::log("SIGPIPE: "); console::log("Broked Pipeline");          onSIGEXIT .emit(); });
-        ::signal( SIGKILL, []( int param ){ onSIGERROR.emit(SIGKILL); conio::log("SIGKILL: "); console::log("Process Killed");           onSIGEXIT .emit(); });
+        ::signal( SIGPIPE, []( int param ){ onSIGERROR.emit(SIGPIPE); console::error("SIGPIPE: Broked Pipeline");         onSIGEXIT .emit(); });
+        ::signal( SIGKILL, []( int param ){ onSIGERROR.emit(SIGKILL); console::error("SIGKILL: Process Killed");          onSIGEXIT .emit(); });
     #endif
-        ::signal( SIGABRT, []( int param ){ onSIGERROR.emit(SIGABRT); conio::log("SIGABRT: "); console::log("Process Abort");            onSIGEXIT .emit(); });
-        ::atexit( /*----*/ []( /*-----*/ ){ /*------------------------------------------------------------------------------------------*/ onSIGCLOSE.emit(); });
+        ::signal( SIGABRT, []( int param ){ onSIGERROR.emit(SIGABRT); console::error("SIGABRT: Process Abort");           onSIGEXIT .emit(); });
+        ::atexit( /*----*/ []( /*-----*/ ){ /*-------------------------------------------------------------------------*/ onSIGCLOSE.emit(); });
     #ifdef SIGPIPE
         ::signal( SIGPIPE, SIG_IGN );
     #endif

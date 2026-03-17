@@ -9,33 +9,29 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_ESP8266_SOCKET
-#define NODEPP_ESP8266_SOCKET
-#define INVALID_SOCKET -1
+#ifndef NODEPP_ARDUINO_SOCKET
+#define NODEPP_ARDUINO_SOCKET
+#define INVALID_SOCKET nullptr
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "lwip/sockets.h"
+struct SOCKET_CTX  { void* socket_fd; uchar addr=0; };
+enum   SOCKET_TYPE { SOCK_STREAM, SOCK_DGRAM };
+using  SOCKET      = void*;
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
 #include "lwip/netdb.h"
+#include "lwip/tcp.h"
+#include "lwip/udp.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { namespace _socket_ {
-
-    inline void start_device(){ 
-    thread_local static bool sockets=false;
-        if( sockets == false ){ /*unused*/ }
-        sockets = true;
-    }
-
-}}
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
 namespace nodepp {
 
+struct ip_t    { string_t address; uint port; };
 struct agent_t {
     ulong buffer_size   = CHUNK_SIZE;
     ulong conn_timeout  = 1000;
@@ -51,12 +47,43 @@ struct agent_t {
 class socket_t {
 protected:
 
-    void kill() const noexcept {
-        obj->state |= STATE::FS_STATE_KILL; 
-        ::shutdown( obj->fd, SHUT_WR ); 
-        ::close(obj->fd);
+    using TIMEVAL = struct timeval;
+    using TCPPCB  = struct tcp_pcb;
+    using UDPPCB  = struct udp_pcb;
+    using PBUF    = struct pbuf   ; 
+
+    /*─······································································─*/
+
+    static void udp_recv_callback( void *arg, TCPPCB* newfd, PBUF* p, ip_addr_t *addr, u16_t port ){
+
     }
 
+    /*─······································································─*/
+
+    static void tcp_recv_callback() {}
+
+    static void tcp_accept() {}
+
+    static void tcp_connect() {}
+
+    static void tcp_keep_alive() {}
+
+protected:
+
+    void kill() const noexcept {
+        obj->state |= STATE::FS_STATE_KILL;
+    switch( obj->type ){
+        case SOCK_STREAM:
+             tcp_shutdown( (TCPPCB*) get_addr_fd(), 1, 1 );
+             tcp_close   ( (TCPPCB*) get_addr_fd() );
+        break;
+        case SOCK_DGRAM :
+             udp_disconnect( (UDPPCB*) get_addr_fd() );
+        break;
+    } obj->fd = INVALID_SOCKET; }
+
+    /*─······································································─*/
+ 
     bool is_state( uchar value ) const noexcept {
         if( obj->state & value ){ return true; }
     return false; }
@@ -66,6 +93,18 @@ protected:
         obj->state = value;
     }
 
+    SOCKADDR* get_addr() const noexcept { 
+        return is_server() ? (SOCKADDR*)&obj->client_addr 
+        /*--------------*/ : (SOCKADDR*)&obj->server_addr; 
+    }
+
+    void* get_addr_fd() const noexcept {
+        if( obj->fd == nullptr ){ return nullptr; }
+        return type::cast<SOCKET_CTX>(fd)->addr;
+    }
+
+    /*─······································································─*/
+
     enum STATE {
          FS_STATE_UNKNOWN = 0b00000000,
          FS_STATE_OPEN    = 0b00000001,
@@ -74,52 +113,52 @@ protected:
          FS_STATE_WRITING = 0b00100000,
          FS_STATE_KILL    = 0b00000100,
          FS_STATE_REUSE   = 0b00001000,
-         FS_STATE_DISABLE = 0b00001110
+         FS_STATE_DISABLE = 0b00001110,
+         FS_STATE_SERVER  = 0b10000000
+    };
+
+    enum BLOCKED {
+         ECONNECTDONE ,
+         EACCEPTDONE  ,
+         EWRITEDONE   ,
+         EREADDONE    ,
+         EDONE        ,
+         EWRITTING    ,
+         EREADING     ,
+         EACCEPTING   ,
+         ECONNECTING
     };
 
 protected:
-
-    using TIMEVAL     = struct timeval;
-    using SOCKADDR    = struct sockaddr;
-    using SOCKADDR_IN = struct sockaddr_in;
-    using SOCKADDR_ST = struct sockaddr_storage;
 
     struct NODE {
 
         ulong recv_timeout=0; 
         ulong send_timeout=0;
-        ulong conn_timeout=0;
-        ulong range[2]= { 0, 0 };
+        ulong conn_timeout=0; 
+        ulong range[2]={0,0};
 
-        socklen_t addrlen, len;
-        int fd = -1, feof = 1; bool srv=0; 
-        uchar state = STATE::FS_STATE_OPEN;
-        SOCKADDR_ST server_addr, client_addr;
+        int feof = 1;
+
+        SOCKET *fd = INVALID_SOCKET;
+        uchar state=STATE::FS_STATE_OPEN;
 
         ptr_t<char> buffer; string_t borrow;
         generator::file::until _until;
         generator::file::line  _line ;
         generator::file::read  _read ;
         generator::file::write _write;
+
+   ~NODE(){ if( fd == nullptr ){ return; }
+        auto  tmp  = type::cast<SOCKET_CTX>(fd);
+        uchar type = tmp->type;
+        void* addr = tmp->addr;
+    switch( type ){
+        case SOCK_STREAM: tcp_remove( (TCPPCB*) addr ); break;
+        case SOCK_STREAM: udp_remove( (UDPPCB*) addr ); break;
+    }   delete tmp; }
+
     };  ptr_t<NODE> obj;
-
-    /*─······································································─*/
-
-    bool is_blocked( int& c ) const noexcept {
-    if ( c >= 0 ){ return 0; } auto error = os::error();
-    if ( error == EISCONN ){ c=0; return 0; } return (
-         error == EWOULDBLOCK || error == EINPROGRESS ||
-         error == EALREADY    || error == EAGAIN      ||
-         error == ECONNRESET  || errno == EMFILE
-    );}
-
-    /*─······································································─*/
-
-    int set_nonbloking_mode() const noexcept {
-        int flags = fcntl( obj->fd, F_GETFL, 0 );
-        if( flags == -1 ){ return -1; }
-        return fcntl( obj->fd, F_SETFL, flags | O_NONBLOCK );
-    }
 
 public:
 
@@ -161,10 +200,12 @@ public:
     }
 
     ulong set_recv_timeout( ulong time ) const noexcept {
-        if( time == 0 ){ obj->recv_timeout = 0; return 0; }
-        TIMEVAL en; memset( &en, 0, sizeof(en) ); en.tv_sec = time / 1000; en.tv_usec = 0;
-    int c= setsockopt( obj->fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&en, sizeof(en) ); 
-        obj->recv_timeout = process::millis() + time; return c==0 ? time : 0;
+        if( time == 0 ){ obj->recv_timeout = 0; return 0; } TIMEVAL en; 
+        en.tv_sec  =  time / 1000; 
+        en.tv_usec = (time % 1000) * 1000;
+        int c = setsockopt( obj->fd, SOL_SOCKET, SO_RCVTIMEO, &en, sizeof(en) ); 
+        obj->recv_timeout = process::millis() + time; 
+        return c == 0 ? time : 0;
     }
 
     ulong set_send_timeout( ulong time ) const noexcept {
@@ -213,11 +254,6 @@ public:
 
     int set_reuse_address( uint en ) const noexcept {
     int c= setsockopt( obj->fd, SOL_SOCKET, SO_REUSEADDR, (char*)&en, sizeof(en) ); 
-        return c;
-    }
-
-    int set_ipv6_only_mode( uint en ) const noexcept {
-    int c= setsockopt( obj->fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&en, sizeof(en) ); 
         return c;
     }
 
@@ -270,11 +306,6 @@ public:
     }
 #endif
 
-    int get_ipv6_only_mode() const noexcept { int en; socklen_t size = sizeof(en);
-    int c= getsockopt(obj->fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&en, &size);
-        return c==0 ? en : c;
-    }
-
     int get_keep_alive() const noexcept { int en; socklen_t size = sizeof(en);
     int c= getsockopt(obj->fd, SOL_SOCKET, SO_KEEPALIVE, (char*)&en, &size);
         return c==0 ? en : c;
@@ -287,31 +318,58 @@ public:
 
     /*─······································································─*/
 
-    string_t get_sockname() const noexcept { SOCKADDR* cli = get_addr();
-    int c= getsockname( obj->fd, cli, &obj->len ); string_t buff { INET_ADDRSTRLEN };
-        inet_ntop( AF, &(((SOCKADDR_IN*)cli)->sin_addr), (char*)buff, buff.size() );
-        return c < 0 ? "127.0.0.1" : buff;
+    expected_t<ip_t,except_t> get_sockname() const noexcept {
+        SOCKADDR_ST addr; socklen_t len = sizeof(addr);
+
+        if( is_closed() )
+          { return except_t( "invalid socket" ); }
+
+        if( getsockname( obj->fd, (SOCKADDR*)&addr, &len ) < 0 )
+          { return except_t( "address not found" ); }
+
+        char host[INET6_ADDRSTRLEN] = {0}; uint port;
+
+        if( addr.ss_family == AF_INET ) {
+            SOCKADDR_IN* s = (SOCKADDR_IN*)&addr;
+            port = ntohs( ((SOCKADDR_IN*) &addr)->sin_port );
+            inet_ntop( AF_INET, &s->sin_addr, host, sizeof(host) );
+        } else {
+            SOCKADDR_IN6* s = (SOCKADDR_IN6*)&addr;
+            port = ntohs( ((SOCKADDR_IN6*) &addr)->sin6_port );
+            inet_ntop( AF_INET6, &s->sin6_addr, host, sizeof(host) );
+        }
+
+        return ip_t({ host, port });
     }
 
-    string_t get_peername() const noexcept { SOCKADDR* cli = get_addr();
-    int c= getpeername( obj->fd, cli, &obj->len ); string_t buff { INET_ADDRSTRLEN };
-        inet_ntop( AF, &(((SOCKADDR_IN*)cli)->sin_addr), (char*)buff, buff.size() );
-        return c < 0 ? "127.0.0.1" : buff;
-    }
+    expected_t<ip_t,except_t> get_peername() const noexcept { 
+        SOCKADDR_ST addr = get_addr(); socklen_t len = sizeof(addr);
 
-    int get_sockport() const noexcept { SOCKADDR* cli = get_addr();
-        return ntohs( ((SOCKADDR_IN*)cli)->sin_port );
-    }
+        if( is_closed() )
+          { return except_t( "invalid socket" ); }
 
-    SOCKADDR* get_addr() const noexcept { 
-        return obj->srv==1 ? (SOCKADDR*)&obj->client_addr 
-        /*--------------*/ : (SOCKADDR*)&obj->server_addr; 
+        if( getpeername( obj->fd, (SOCKADDR*) &addr, &len ) < 0 )
+          { return except_t( "address not found" ); }
+
+        char host[INET6_ADDRSTRLEN] = {0}; uint port;
+
+        if( addr.ss_family == AF_INET ) {
+            SOCKADDR_IN* s = (SOCKADDR_IN*)&addr;
+            port = ntohs( ((SOCKADDR_IN*) &addr)->sin_port );
+            inet_ntop( AF_INET, &s->sin_addr, host, sizeof(host) );
+        } else {
+            SOCKADDR_IN6* s = (SOCKADDR_IN6*)&addr;
+            port = ntohs( ((SOCKADDR_IN6*) &addr)->sin6_port );
+            inet_ntop( AF_INET6, &s->sin6_addr, host, sizeof(host) );
+        }
+
+        return ip_t({ host, port });
     }
 
     /*─······································································─*/
 
     ulong set_buffer_size( ulong _size ) const noexcept {
-        set_send_buff( _size ); set_recv_buff( _size );
+    //  set_send_buff( _size ); set_recv_buff( _size );
         obj->buffer = ptr_t<char>(_size); return _size;
     }
 
@@ -332,10 +390,10 @@ public:
     /*─······································································─*/
 
     bool     is_closed() const noexcept { return is_state(STATE::FS_STATE_DISABLE) || is_feof() || obj->fd==INVALID_SOCKET; }
+    bool     is_server() const noexcept { return obj->state & STATE::FS_STATE_SERVER; }
     bool       is_feof() const noexcept { return obj->feof <= 0 && obj->feof != -2; }
     bool    is_waiting() const noexcept { return obj->feof == -2; }
     bool  is_available() const noexcept { return !is_closed(); }
-    bool     is_server() const noexcept { return obj->srv;  }
 
     /*─······································································─*/
 
@@ -346,7 +404,7 @@ public:
 
     /*─······································································─*/
 
-    int       get_fd() const noexcept { return obj == nullptr ? INVALID_SOCKET : obj->fd;    }
+    SOCKET    get_fd() const noexcept { return obj == nullptr ? INVALID_SOCKET : obj->fd;    }
     ulong* get_range() const noexcept { return obj == nullptr ?        nullptr : obj->range; }
 
     /*─······································································─*/
@@ -403,15 +461,16 @@ public:
     }
 
     /*─······································································─*/
-
-    socket_t( int fd, ulong _size=CHUNK_SIZE ) : obj( new NODE() ) { _socket_::start_device();
-        if( fd == INVALID_SOCKET ){ throw except_t("Such Socket has an Invalid fd"); }
-        obj->fd = fd; set_nonbloking_mode(); set_buffer_size(_size);
-    }
     
     virtual ~socket_t() noexcept { if( obj.count()>1 && !is_closed() ){ return; } free(); }
 
-    socket_t() noexcept : obj( new NODE() ) { _socket_::start_device(); }
+    socket_t( SOCKET* fd, ulong _size=CHUNK_SIZE ) : obj( new NODE() ) {
+        if( fd == INVALID_SOCKET )
+          { ARDUINO_ERROR("Such Socket has an Invalid fd"); }
+        obj->fd = fd; set_buffer_size(_size);
+    }
+
+    socket_t() noexcept : obj( new NODE() ) {}
 
     /*─······································································─*/
 
@@ -431,15 +490,19 @@ public:
     /*─······································································─*/
 
     virtual int socket( const string_t& host, int port ) const noexcept {
-        if( host.empty() ){ onError.emit("dns coudn't found ip"); return -1; }
+        if( host.empty() ){ onError.emit("invalid IP address"); return -1; }
             obj->addrlen = sizeof( obj->server_addr );
 
-        if((obj->fd=::socket( AF, SOCK, IPPROTO )) == INVALID_SOCKET )
+        void* tmp = nullptr; switch( SOCK ){
+            case SOCK_STREAM: tmp = tcp_new(); break;
+            case SOCK_DGRAM : tmp = udp_new(); break;
+        }
+
+        if( tmp == INVALID_SOCKET )
           { onError.emit("can't initializate socket fd"); return -1; }
 
+        obj->fd = new SOCKET_CTX({ tmp, SOCK });
         set_buffer_size( CHUNK_SIZE );
-        set_nonbloking_mode();
-        set_ipv6_only_mode(0);
         set_reuse_address(1);
 
     #ifdef SO_REUSEPORT
@@ -465,32 +528,63 @@ public:
 
     /*─······································································─*/
 
-    int _connect() const noexcept { int c=0;
-        if( process::millis() > get_conn_timeout() || obj->srv==1 ){ return -1; }
-        return is_blocked( c=::connect( obj->fd, (SOCKADDR*) &obj->server_addr, obj->addrlen ) ) ? -2 : c>=0 ? 1: -1;
-    }
+    int _connect() const noexcept { 
+        if( process::millis() > get_conn_timeout() || is_server() ){ return -1; }
+        if( obj->errno != BLOCKED::EDONE ) /*-------------------*/ { return -2; }
+            obj->errno  = BLOCKED::ECONNECTING;
+    switch( obj->type ){
+        case SOCK_STREAM: 
+             tcp_connect( (TCPPCB*) obj->fd, tcp_connect_callback );
+        return  1; break;
+        case SOCK_DGRAM : 
+             udp_connect( (UDPPCB*) obj->fd, udp_connect_callback );
+        return  1; break;
+    }   return -1; }
 
-    int _accept() const noexcept { int c=0; if( obj->srv == 0 ){ return -1; }
-        return is_blocked( c=::accept( obj->fd, (SOCKADDR*) &obj->server_addr, &obj->addrlen ) ) ? -2 : c;
-    }
+    int _accept() const noexcept { 
+        if( !is_server() ) /*----------*/ { return -1; } 
+        if( obj->errno != BLOCKED::EDONE ){ return -2; }
+            obj->errno  = BLOCKED::EACCEPTING;
+    switch( obj->type ){
+        case SOCK_STREAM: 
+             tcp_accept( (TCPPCB*) obj->fd, tcp_accept_callback );
+        return  1; break;
+        case SOCK_DGRAM : 
+             udp_accept( (UDPPCB*) obj->fd, udp_accept_callback );
+        return  1; break;
+    }   return -1; }
 
     /*─······································································─*/
 
-    int listen() const noexcept { if( obj->srv == 0 ){ return -1; }
-        return ::listen( obj->fd, MAX_SOCKET ) ?-1: 1;
+    int listen() const noexcept { if( !is_server() ){ return -1; }
+        if( obj->fd == INVALID_SOCKET ){ return -1; } 
+    switch( obj->type ){
+        case SOCK_STREAM:
+             obj->fd = tcp_listen( (TCPPCB*) obj->fd );
+        return  1; break;
+        case SOCK_DGRAM :
+             obj->fd = udp_listen( (UDPPCB*) obj->fd );
+        return  1; break;
+    }   return -1; }
+
+    int connect() const noexcept { int c=0;
+        while((c=_connect()) == -2 ){ process::next(); } return c;
     }
 
     int accept() const noexcept { int c=0;
         while((c=_accept()) == -2 ){ process::next(); } return c;
     }
 
-    int connect() const noexcept { int c=0;
-        while((c=_connect()) == -2 ){ process::next(); } return c;
-    }
-
-    int bind() const noexcept { obj->srv = 1;
-        return ::bind( obj->fd, (SOCKADDR*) &obj->server_addr, obj->addrlen ) ?-1: 1;
-    }
+    int bind() const noexcept { obj->state |= STATE::FS_STATE_SERVER;
+        if( obj->fd == INVALID_SOCKET ){ return -1; } 
+    switch( obj->type ){
+        case SOCK_STREAM:
+             tcp_bind( (TCPPCB*) obj->fd );
+        return  1; break;
+        case SOCK_DGRAM :
+             udp_bind( (UDPPCB*) obj->fd );
+        return  1; break; 
+    }   return -1; }
 
     /*─······································································─*/
 

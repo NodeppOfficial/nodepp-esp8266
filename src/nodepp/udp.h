@@ -75,8 +75,6 @@ public:
           { onError.emit("udp listener is closed"); return; } 
         if( obj->state & STATE::UDP_STATE_USED )
           { onError.emit("udp listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
 
         socket_t sk; obj->state= STATE::UDP_STATE_USED;
         sk.SOCK    = SOCK_DGRAM  ;
@@ -118,8 +116,6 @@ public:
           { onError.emit("udp listener is closed"); return; } 
         if( obj->state & STATE::UDP_STATE_USED )
           { onError.emit("udp listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
 
         socket_t sk; obj->state= STATE::UDP_STATE_USED;
         sk.SOCK    = SOCK_DGRAM  ;

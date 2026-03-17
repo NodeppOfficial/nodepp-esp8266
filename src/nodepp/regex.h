@@ -500,8 +500,7 @@ namespace nodepp { namespace regex {
     string_t format( const string_t& val, const T&... args ){
         auto count = string::count( []( string_t ){ return true; }, args... );
 
-        queue_t<string_t> out; ulong idx=0;
-        static ptr_t<regex_t> reg ({
+        queue_t<string_t> out; ulong idx=0; ptr_t<regex_t> reg ({
             regex_t( MEMSTR( "\\$\\{\\d+\\}" ) ),
             regex_t( MEMSTR( "\\d+" ) )
         });

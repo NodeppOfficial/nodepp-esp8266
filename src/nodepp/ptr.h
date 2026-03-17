@@ -14,7 +14,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#if !defined( NODEPP_ATOMIC_SMART_POINTER_OFF ) && __GCC_ATOMIC_INT_LOCK_FREE==2
+#if !defined( NODEPP_ATOMIC_SMART_POINTER_OFF ) && defined(NODEPP_THREAD_SUPPORTED)
 #define  NODEPP_ATOMIC_ENABLED
 #include "atomic.h"
 #endif
@@ -349,7 +349,7 @@ public:
 
     /*─······································································─*/
 
-    ulong    count() const noexcept { return null() ? 0 /*-*/ : (ulong) address->count; }
+    ulong    count() const noexcept { return null() ? 0 /*-*/ : SHOULD_CLOSE() ? 1 : (ulong) address->count; }
     ulong     size() const noexcept { return null() ? 0 /*-*/ : limit - offset; }
     
     T*       begin() const noexcept { return null() ? nullptr : _begin_( address ); }

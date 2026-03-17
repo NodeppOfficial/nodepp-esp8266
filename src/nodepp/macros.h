@@ -14,7 +14,15 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define ARDUINO_RESET()    do { void(*callback) (void) = 0; /*-*/ callback(); } while(0)
+#if defined(_POSIX_THREADS) && (_POSIX_THREADS > 0)
+#define NODEPP_THREAD_SUPPORTED
+#else
+#define thread_local  
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#define ARDUINO_RESET()    ESP.restart()
 #ifndef ARDUINO_ALLOW_EXCEPTION
 #define ARDUINO_ERROR(...) do { console::error(__VA_ARGS__); ARDUINO_RESET(); } while(0)
 #else
@@ -27,24 +35,23 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define coDelay(VALUE)           do { _time_=process::millis()+VALUE; while( process::millis()<_time_ ){ coErrno(VALUE,_LINE_,1); }} while(0);
-#define coUDelay(VALUE)          do { _time_=process::micros()+VALUE; while( process::micros()<_time_ ){ coNext; }} while(0);
-#define coErrno(DELAY,STATE,OUT) do { coSet(STATE); coroutine::getno( OUT,coGet,DELAY ); return OUT; case STATE:; } while(0);
+#define coDelay(VALUE)  do { _time_=process::millis()+VALUE; coWait( process::millis()<_time_ ); } while(0);
+#define coUDelay(VALUE) do { _time_=process::micros()+VALUE; coWait( process::micros()<_time_ ); } while(0);
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define coGoto(VALUE)  do { coSet( VALUE ); coroutine::getno(1,coGet); return 1; } while(0);
-#define coStay(VALUE)  do { coSet( VALUE ); coroutine::getno(0,coGet); return 0; } while(0);
-#define coNext         do { coErrno(0UL,_LINE_,1); /*-------------------------*/ } while(0);
-#define coYield(VALUE) do { coErrno(0UL, VALUE,1); /*-------------------------*/ } while(0);
-#define coWait(VALUE)  do { while( VALUE ){ /*------------------------*/ coNext;}} while(0);
-#define coEnd          do { _time_=0; _state_=_time_; /**/ coroutine::getno(-1); } while(0); return -1;
-#define coStop            } _time_=0; _state_=_time_; /**/ coroutine::getno(-1); } while(0); return -1;
+#define coGoto(VALUE)  do { coSet( VALUE ); return 1; /*---------*/ } while(0);
+#define coStay(VALUE)  do { coSet( VALUE ); return 0; /*---------*/ } while(0);
+#define coNext         do { coSet( _LINE_); return 1; case _LINE_:; } while(0);
+#define coYield(VALUE) do { coSet( VALUE ); return 1; case VALUE :; } while(0);
+#define coWait(VALUE)  do { while( VALUE ){ /*-----------*/ coNext;}} while(0);
+#define coEnd          do { _time_=0; _state_=_time_;    return -1; } while(0);
+#define coStop            } _time_=0; _state_=_time_;    return -1; } while(0);
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #define coStart  thread_local static int _state_=0; thread_local static ulong _time_=0; coBegin
-#define coBegin  do { switch(_state_) { case 0:; coroutine::getno(-2);
+#define coBegin  do { switch(_state_) { case 0:;
 #define coEmit   int operator()
 
 #define coSet(VALUE) _state_ = VALUE
@@ -97,16 +104,16 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+bool&   SHOULD_CLOSE(){ static bool out=false; return out; }
 #define TIMEOUT         process::get_timeout()
 
 #define HASH_TABLE_SIZE 16
-#define MAX_POOL_SIZE    8
-#define MAX_SSO         32
-#define MAX_BATCH       16
+#define MAX_SOCKET      10
+#define MAX_SSO         16
 #define MAX_PATH        1024
-#define UNBFF_SIZE      128
-#define MAX_SOCKET      64
-#define CHUNK_SIZE      1024
+#define MAX_BATCH       16
+#define UNBFF_SIZE      1024
+#define CHUNK_SIZE      4096
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -267,13 +274,8 @@
 #define uchar16 unsigned int
 #define uchar32 unsigned long int
 
-#if !defined(_SYS_TYPES_H_) || _OS_ == NODEPP_OS_ANDROID
-    #define  _SYS_TYPES_H_
-
 #define ushort unsigned short
 #define uint   unsigned int
-
-#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

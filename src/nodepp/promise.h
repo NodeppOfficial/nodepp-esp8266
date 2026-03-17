@@ -14,6 +14,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#include "any.h"
 #include "expected.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -48,7 +49,6 @@ private:
 protected:
 
     struct NODE {
-        ptr_t<task_t> tsk;
         any_t /*-*/ value;
         NODE_CLB node_clb;
         REJECT    rej_clb;
@@ -65,30 +65,27 @@ protected:
         if( obj->state&( PROMISE_STATE::FINISHED  |
             /*--------*/ PROMISE_STATE::CLOSED    |
             /*--------*/ PROMISE_STATE::PENDING  )){ return; }
-
-        if( obj->node_clb.null() ){
-            obj->state = PROMISE_STATE::CLOSED;
-            return;
-        }
+        if( obj->node_clb.null() )
+          { obj->state = PROMISE_STATE::CLOSED; /**/ return; }
 
         obj->state|= PROMISE_STATE::PENDING;
         auto self  = type::bind( this );
 
-        self->obj->node_clb([=]( T value ){
-            self->obj->value = value; /*-------------*/
-            self->obj->res_clb.emit(value); /*-------*/
-            self->obj->fin_clb.emit(/*-*/); /*-------*/
+        obj->node_clb([=]( T value ){
             self->obj->state = PROMISE_STATE::FINISHED;
             self->obj->state|= PROMISE_STATE::RESOLVED;
             self->obj->state|= PROMISE_STATE::CLOSED  ;
-        },[=]( V value ){
             self->obj->value = value; /*-------------*/
-            self->obj->rej_clb.emit(value); /*-------*/
+            self->obj->res_clb.emit(value); /*-------*/
             self->obj->fin_clb.emit(/*-*/); /*-------*/
+        self->free(); },[=]( V value ){
             self->obj->state = PROMISE_STATE::FINISHED;
             self->obj->state|= PROMISE_STATE::REJECTED;
             self->obj->state|= PROMISE_STATE::CLOSED  ;
-        });
+            self->obj->value = value; /*-------------*/
+            self->obj->rej_clb.emit(value); /*-------*/
+            self->obj->fin_clb.emit(/*-*/); /*-------*/
+        self->free(); });
 
     }
 
@@ -138,11 +135,13 @@ public:
     }
 
     void close() const noexcept { off(); }
-
-    void off() const noexcept {
-        obj->state = PROMISE_STATE::CLOSED;
-        process::clear( obj->tsk );
-        obj->node_clb.free();
+    void  free() const noexcept { off(); }
+    void   off() const noexcept {
+        obj->state |= PROMISE_STATE::CLOSED;
+    //  obj->node_clb.clear();
+        obj->rej_clb .clear();
+        obj->fin_clb .clear();
+        obj->fin_clb .clear();
     }
 
     /*─······································································─*/
@@ -165,19 +164,16 @@ public:
 
     /*─······································································─*/
 
-    void emit() const noexcept {
+    void emit() const noexcept { do {
 
-        if( obj->state== PROMISE_STATE::UNDEFINED ){ return; }
+        if( obj->state== PROMISE_STATE::UNDEFINED ){ break ; }
         if( obj->state&( PROMISE_STATE::FINISHED  |
             /*--------*/ PROMISE_STATE::CLOSED    |
             /*--------*/ PROMISE_STATE::PENDING  )){ return; }
 
-        auto self = type::bind( this );
-        obj->tsk  = process::add([=](){ 
-             self->invoke(); return -1; 
-        });
+        invoke(); return; 
 
-    }
+    } while(0); free(); }
 
     /*─······································································─*/
 
@@ -288,3 +284,5 @@ namespace nodepp { namespace promise {
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

@@ -75,8 +75,6 @@ public:
           { onError.emit("tcp listener is closed"); return; } 
         if( obj->state & STATE::TCP_STATE_USED )
           { onError.emit("tcp listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
 
         socket_t sk; obj->state= STATE::TCP_STATE_USED;
         sk.SOCK    = SOCK_STREAM ;
@@ -134,8 +132,6 @@ public:
           { onError.emit("tcp listener is closed"); return; } 
         if( obj->state & STATE::TCP_STATE_USED )
           { onError.emit("tcp listener is used");   return; } 
-        if( dns::lookup(host).empty() )
-          { onError.emit("dns couldn't get ip");    return; }
 
         socket_t sk; obj->state= STATE::TCP_STATE_USED;
         sk.SOCK    = SOCK_STREAM ;

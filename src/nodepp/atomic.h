@@ -14,7 +14,11 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "arduino/atomic.h"
+#if (_KERNEL_==NODEPP_KERNEL_ARDUINO) && defined(NODEPP_THREAD_SUPPORTED)
+    #include "arduino/atomic.h"
+#else
+    #error "This OS Does not support atomic.h"
+#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

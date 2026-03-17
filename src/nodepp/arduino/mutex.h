@@ -21,7 +21,7 @@
 namespace nodepp { namespace worker {
 
     inline void    delay( ulong time ){ process::delay(time); }
-    inline void    yield(){ delay(TIMEOUT); sched_yield(); }
+    inline void    yield(){ ::yield(); vTaskDelay(1); }
     inline pthread_t pid(){ return pthread_self(); }
     inline void     exit(){ pthread_exit(NULL); }
 
@@ -41,7 +41,7 @@ public:
 
     mutex_t() : obj( new NODE() ) {
         if( pthread_mutex_init(&obj->fd,NULL)!=0 )
-          { throw except_t("Cant Start Mutex");  }
+          { ARDUINO_ERROR("Cant Start Mutex");  }
             /*-----------------*/ obj->alive=1;
     }
 

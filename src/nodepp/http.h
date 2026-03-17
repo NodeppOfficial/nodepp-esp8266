@@ -110,7 +110,7 @@ namespace nodepp { struct fetch_t {
     /*─······································································─*/
 
     header_t  headers;
-    ulong     timeout = 0;
+    ulong     timeout = 60000;
     
     /*─······································································─*/
 
@@ -228,13 +228,12 @@ public:
 namespace nodepp { namespace http {
 
     inline tcp_t server( function_t<void,http_t> cb, agent_t* opt=nullptr ){
-        auto server = tcp::server( opt ); auto clb = type::bind( cb );
-        server.onConnect([=]( socket_t raw ){ http_t cli = raw;
+        return tcp_t([=]( http_t cli ){
 
             int c=0; while((c=cli.read_header())==1){ /*unused*/ }
-            if( c==0 ){ (*clb)(cli); return; }
-
-        cli.close(); }); return server;
+            if( c==0 ){ cb(cli); return; }
+        
+        cli.close(); }, opt );
     }
 
     /*─······································································─*/
@@ -252,7 +251,7 @@ namespace nodepp { namespace http {
         /*-------------------------*/ fetch->headers["Host"] = dip;
         string_t dir = uri.pathname + uri.search + uri.hash;
        
-        auto   skt = tcp::client( &agent ); skt.onConnect([=]( socket_t raw ){
+        auto   skt = tcp_t([=]( http_t raw ){
         http_t cli = raw;
 
             cli.set_timeout( fetch->timeout ); cli.write_header( fetch, dir );
@@ -261,7 +260,7 @@ namespace nodepp { namespace http {
             if( c==0 ){ res(cli); return; } cli.close();
             rej(except_t("Could not connect to server"));
 
-        });
+        }, &agent );
 
         skt.onError([=]( except_t error ){ rej(error); });
         skt.connect( dip, uri.port );
