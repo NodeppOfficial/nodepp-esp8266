@@ -12,8 +12,14 @@
 #ifndef NODEPP_KERNEL
 #define NODEPP_KERNEL
 
-#include "./arduino/kernel.h"
+/*────────────────────────────────────────────────────────────────────────────*/
 
+#if   _KERNEL_ == NODEPP_KERNEL_ARDUINO
+    #include "arduino/kernel.h"
+#else
+    #error "This OS Does not support kernel.h"
 #endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
+
+#endif

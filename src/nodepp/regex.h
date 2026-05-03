@@ -502,16 +502,16 @@ namespace nodepp { namespace regex {
 
         queue_t<string_t> out; ulong idx=0;
         static ptr_t<regex_t> reg ({
-            regex_t( MEMSTR( "\\$\\{\\d+\\}" ) ),
-            regex_t( MEMSTR( "\\d+" ) )
+               regex_t( "\\$\\{\\d+\\}" ),
+               regex_t( "\\d+" )
         });
 
         for( auto &x: reg[0].search_all( val ) ){
         auto y = string::to_uint( reg[1].match( val.slice_view( x[0], x[1] ) ) );
-        if ( y >= count ){ break; }
-             out.push( val.slice( idx,x[0] ) );
+        if ( y >= count ){ continue; }
+             out.push( val.slice_view( idx,x[0] ) );
              out.push( string::get( y , args... ) ); idx = x[1];
-        }    out.push( val.slice( idx ) );
+        }    out.push( val.slice_view( idx ) );
 
         return array_t<string_t>( out.data() ).join("");
     }

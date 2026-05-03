@@ -4,28 +4,22 @@
  * Licensed under the MIT (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
- * https://github.com/NodeppOfficial/nodepp/blob/main/LICENSE
+ * https://github.com/NodeppOficial/nodepp/blob/main/LICENSE
  */
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_POSIX_FILE
-#define NODEPP_POSIX_FILE
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
-#include <sys/file.h>
-#include <unistd.h>
-#include <fcntl.h>
+#ifndef NODEPP_ARDUINO_FILE
+#define NODEPP_ARDUINO_FILE
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { class file_t {
-protected:
+private:
 
-    void kill() const noexcept {
+    void kill() const noexcept { 
         obj->state |= STATE::FS_STATE_KILL;
-    if( !is_std() ){ ::close( obj->fd ); }}
+    }
 
     bool is_state( uchar value ) const noexcept {
         if( obj->state & value ){ return true; }
@@ -50,54 +44,23 @@ protected:
 protected:
 
     struct NODE {
-
-        ulong range[2] = { 0, 0 };
-        int fd=-1, feof=1;
-        uchar state = STATE::FS_STATE_OPEN;
+        ulong range[2] ={ 0, 0 };
+        FILE* fd       = nullptr;
+        int   feof     = 1;
+        uchar state    = STATE::FS_STATE_OPEN;
 
         ptr_t<char> buffer; string_t borrow;
         generator::file::until _until;
         generator::file::line  _line ;
         generator::file::read  _read ;
         generator::file::write _write;
+
+       ~NODE(){
+        if( fd==stdin  || /*------*/
+            fd==stdout || fd==stderr 
+        ) { return; } fclose( fd ); }
     };  ptr_t<NODE> obj;
-
-    /*─······································································─*/
-
-    bool is_std() const noexcept { 
-        return obj->fd == STDOUT_FILENO ||
-               obj->fd == STDIN_FILENO  ||
-               obj->fd == STDERR_FILENO ;
-    }
-
-    /*─······································································─*/
-
-    bool is_blocked( int& c ) const noexcept {
-    if ( c >= 0 ){ return 0; } auto error = os::error(); return (
-         error == EWOULDBLOCK || error == EINPROGRESS ||
-         error == EALREADY    || error == EAGAIN
-    );}
-
-    /*─······································································─*/
-
-    int set_nonbloking_mode() const noexcept {
-        int flags = fcntl( obj->fd, F_GETFL, 0 );
-        return fcntl( obj->fd, F_SETFL, flags | O_NONBLOCK );
-    }
-
-    /*─······································································─*/
-
-    uint get_fd_flag( const string_t& flag ){ uint _flag = O_NONBLOCK;
-        if  ( flag == "r"  ){ _flag |= O_RDONLY ;                     }
-        elif( flag == "w"  ){ _flag |= O_WRONLY | O_CREAT  | O_TRUNC; }
-        elif( flag == "a"  ){ _flag |= O_WRONLY | O_APPEND | O_CREAT; }
-        elif( flag == "r+" ){ _flag |= O_RDWR   | O_APPEND ;          }
-        elif( flag == "w+" ){ _flag |= O_RDWR   | O_APPEND | O_CREAT; }
-        elif( flag == "a+" ){ _flag |= O_RDWR   | O_APPEND ;          }
-        else                { _flag |= O_RDWR   ;                     }
-        return  _flag;
-    }
-
+    
 public:
 
     event_t<>          onUnpipe;
@@ -111,47 +74,49 @@ public:
 
     /*─······································································─*/
 
-    file_t( const string_t& path, const string_t& mode, const ulong& _size=CHUNK_SIZE ) : obj( new NODE() ) {
-            obj->fd = open( path.data(), get_fd_flag( mode ), 0644 ); /*-----------*/
-        if( obj->fd < 0 ){ ARDUINO_ERROR( "such file or directory does not exist"); }
-        set_nonbloking_mode(); set_buffer_size( _size );
+    file_t( const string_t& path, const string_t& mode, const ulong& _size=NODEPP_CHUNK_SIZE ) : obj( new NODE() ) {
+            obj->fd = fopen( path.c_str(), mode.c_str() ); 
+        if( obj->fd == nullptr ){
+            NODEPP_THROW_ERROR( "such file or directory does not exist" );
+        }   set_buffer_size( _size ); 
     }
 
-    file_t( const int& fd, const ulong& _size=CHUNK_SIZE ) : obj( new NODE() ) {
-        if( fd<0 ){ ARDUINO_ERROR( "such file or directory does not exist"); }
-        obj->fd = fd; set_nonbloking_mode(); set_buffer_size( _size );
+    file_t( FILE* fd, const ulong& _size=NODEPP_CHUNK_SIZE ) : obj( new NODE() ) {
+        if( fd == nullptr )
+          { NODEPP_THROW_ERROR( "such file or directory does not exist" ); }   
+            obj->fd = fd; set_buffer_size( _size ); 
     }
 
    ~file_t() noexcept { if( obj.count()>1 && !is_closed() ){ return; } free(); }
-     
+
     file_t() noexcept : obj( new NODE() ) {}
 
     /*─······································································─*/
 
-    void  resume() const noexcept { if(is_state(STATE::FS_STATE_OPEN )){ return; } set_state(STATE::FS_STATE_OPEN ); onResume.emit(); }
-    void    stop() const noexcept { if(is_state(STATE::FS_STATE_REUSE)){ return; } set_state(STATE::FS_STATE_REUSE); onDrain .emit(); }
-    void   reset() const noexcept { if(is_state(STATE::FS_STATE_KILL )){ return; } resume(); pos(0); }
-    void   flush() const noexcept { obj->buffer.fill(0); }
-
-    /*─······································································─*/
-
-    bool     is_closed() const noexcept { return is_state(STATE::FS_STATE_DISABLE) || is_feof() || obj->fd==-1; }
+    bool     is_closed() const noexcept { return is_state(STATE::FS_STATE_DISABLE) || obj->fd==nullptr; }
     bool       is_feof() const noexcept { return obj->feof <= 0 && obj->feof != -2; }
     bool    is_waiting() const noexcept { return obj->feof == -2; }
     bool  is_available() const noexcept { return !is_closed(); }
 
     /*─······································································─*/
 
-    void close() const noexcept {
-        if( is_state ( STATE::FS_STATE_DISABLE ) ){ return; }
-            set_state( STATE::FS_STATE_CLOSE   );
-    onDrain.emit(); free(); }
+    void  resume() const noexcept { if(is_state(STATE::FS_STATE_OPEN )){ return; } onResume.emit(); set_state(STATE::FS_STATE_OPEN ); }
+    void    stop() const noexcept { if(is_state(STATE::FS_STATE_REUSE)){ return; } onDrain .emit(); set_state(STATE::FS_STATE_REUSE); }
+    void   reset() const noexcept { if(is_state(STATE::FS_STATE_KILL )){ return; } resume(); pos(0); }
+    void   flush() const noexcept { obj->buffer.fill(0); }
 
     /*─······································································─*/
 
-    void   set_range( ulong x, ulong y ) const noexcept { obj->range[0] = x; obj->range[1] = y; }
+    void close() const noexcept {
+        if( is_state ( STATE::FS_STATE_DISABLE ) ) { return; }
+            onDrain.emit(); set_state( STATE::FS_STATE_CLOSE );
+    free(); }
+
+    /*─······································································─*/
+
+    void set_range( ulong x, ulong y ) const noexcept { obj->range[0] = x; obj->range[1] = y; }
     ulong* get_range() const noexcept { return obj == nullptr ? nullptr : obj->range; }
-    int       get_fd() const noexcept { return obj == nullptr ?      -1 : obj->fd; }
+    int       get_fd() const noexcept { return obj == nullptr ? -1 :(int) obj->fd; }
 
     /*─······································································─*/
 
@@ -169,25 +134,15 @@ public:
 
     /*─······································································─*/
 
-    ulong pos( ulong _pos ) const noexcept {
-        auto   _npos = lseek( obj->fd, _pos, SEEK_SET );
-        return _npos < 0 ? 0 : _npos;
-    }
-
     ulong size() const noexcept { auto curr = pos();
-        if( lseek( obj->fd, 0 , SEEK_END )<0 ){ return 0; }
-        ulong size = lseek( obj->fd, 0, SEEK_END );
+        if( fseek( obj->fd, 0 , SEEK_END ) != 0 ){ return 0; }
+        ulong size = ftell(obj->fd); 
         pos( curr ); return size;
-    }
-
-    ulong pos() const noexcept {
-        auto   _npos = lseek( obj->fd, 0, SEEK_CUR );
-        return _npos < 0 ? 0 : _npos;
     }
 
     /*─······································································─*/
 
-    ulong set_buffer_size( ulong _size ) const noexcept {
+    ulong set_buffer_size( ulong _size ) const noexcept { 
         obj->buffer = ptr_t<char>( _size ); return _size;
     }
 
@@ -195,16 +150,27 @@ public:
 
     void free() const noexcept {
 
-        if( is_state( STATE::FS_STATE_REUSE ) && !is_feof() && obj.count()>1 ){ return; }
-        if( is_state( STATE::FS_STATE_KILL  ) ) /*-------*/ { return; } 
-        if(!is_state( STATE::FS_STATE_CLOSE | STATE::FS_STATE_REUSE ) )
-          { kill(); onDrain.emit(); } else { kill(); }
+        if( is_state( STATE::FS_STATE_REUSE ) && !is_feof() && obj.count()>1 ) { return; }
+        if( is_state( STATE::FS_STATE_KILL  ) ){ return; } /*-----------------*/ kill();
+        if(!is_state( STATE::FS_STATE_CLOSE | STATE::FS_STATE_REUSE ) ){ onDrain.emit(); }
        
+        onClose.emit();
+
         onUnpipe.clear(); onResume.clear();
-        onError .clear(); onData  .clear(); 
-        onOpen  .clear(); onPipe  .clear(); onClose.emit();
+        onError .clear(); onData  .clear();
+        onOpen  .clear(); /*-------------*/
+        onPipe  .clear(); onClose .clear();
 
     }
+
+    /*─······································································─*/
+
+    ulong pos( ulong _pos ) const noexcept {
+        fseek( obj->fd, _pos, SEEK_SET ); 
+        return pos();
+    }
+
+    ulong pos() const noexcept { return ftell( obj->fd ); }
 
     /*─······································································─*/
 
@@ -230,7 +196,7 @@ public:
 
     /*─······································································─*/
 
-    string_t read( ulong size=CHUNK_SIZE ) const noexcept {
+    string_t read( ulong size=NODEPP_CHUNK_SIZE ) const noexcept {
         while( obj->_read( this, size ) == 1 )
              { process::next(); }
         return obj->_read.data;
@@ -251,16 +217,14 @@ public:
 
     virtual int __read( char* bf, const ulong& sx ) const noexcept {
         if( is_closed() ){ return -1; } if( sx==0 ){ return 0; }
-        obj->feof = ::read( obj->fd, bf, sx );
-        obj->feof = is_blocked(obj->feof)?-2 : obj->feof;
-        return ( obj->feof <= 0 && obj->feof != -2 ) ? -1 : obj->feof;
+        obj->feof =fread( bf, sizeof(char), sx, obj->fd );
+        return obj->feof<=0 ? -1 : obj->feof;
     }
 
     virtual int __write( char* bf, const ulong& sx ) const noexcept {
         if( is_closed() ){ return -1; } if( sx==0 ){ return 0; }
-        obj->feof = ::write( obj->fd, bf, sx );
-        obj->feof = is_blocked(obj->feof)? -2 : obj->feof;
-        return ( obj->feof <= 0 && obj->feof != -2 ) ? -1 : obj->feof;
+        obj->feof=fwrite( bf, sizeof(char), sx, obj->fd );
+        return obj->feof<=0 ? -1 : obj->feof;
     }
 
     /*─······································································─*/
@@ -286,5 +250,3 @@ public:
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
-
-/*────────────────────────────────────────────────────────────────────────────*/

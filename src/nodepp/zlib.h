@@ -29,17 +29,22 @@
 namespace nodepp { class zlib_t {
 protected:
 
+    enum STATE {
+         STATE_ZLIB_IDLE    = 0b00000000,
+         STATE_ZLIB_OPEN    = 0b00000001,
+         STATE_ZLIB_INFLATE = 0b00000010,
+         STATE_ZLIB_DEFLATE = 0b00000100,
+    };
+
     struct NODE {
-        z_stream  fd;
-        bool state= 1;
-        int  mode = 0;
-        int  type = 0;
+
+        int state = STATE_ZLIB_IDLE; 
+        int type  = 0; z_stream fd;
         ptr_t<char> bff;
 
-       ~NODE() { switch( mode ){
-            case -1: inflateEnd( &fd ); break;
-            case  1: deflateEnd( &fd ); break;
-        }}
+       ~NODE() { 
+        if( state & STATE::STATE_ZLIB_DEFLATE ){ deflateEnd( &fd ); }
+        if( state & STATE::STATE_ZLIB_INFLATE ){ inflateEnd( &fd ); }}
 
     };  ptr_t<NODE> obj;
 
@@ -51,6 +56,9 @@ protected:
         obj->fd.avail_in = Z_NULL;
     }
 
+    bool is_inflate() const noexcept { return obj->state & STATE_ZLIB_INFLATE; }
+    bool is_deflate() const noexcept { return obj->state & STATE_ZLIB_DEFLATE; }
+
 public:
 
     event_t<except_t>  onError;
@@ -60,36 +68,38 @@ public:
     event_t<string_t>  onData;
     
     /*─······································································─*/
-    
-   ~zlib_t() noexcept { if( obj.count()>1 || obj->state==0 ){ return; } free(); }
 
-    zlib_t( int type=0, ulong size=CHUNK_SIZE ) noexcept : obj( new NODE ) { 
+    zlib_t( int type=0, ulong size=NODEPP_CHUNK_SIZE ) noexcept : obj( new NODE ) { 
+        obj->state= STATE::STATE_ZLIB_OPEN;
         obj->bff  = ptr_t<char>( size ); 
         obj->type = type; _init_(); 
     }
+    
+   ~zlib_t() noexcept { if( obj.count()>1 ){ return; } free(); }
 
     /*─······································································─*/
     
     void free() const noexcept {
-        if( obj->state == 0 ){ return; } 
-            obj->state = 0;
-        onDrain.emit(); onClose.emit();
+        if( is_closed() ){ return; } 
+        obj->state &=~ STATE_ZLIB_OPEN;
+        onDrain.emit (); onClose.emit ();
+        onDrain.clear(); onClose.clear();
     }
     
     /*─······································································─*/
 
     void        close() const noexcept { free(); }
-    bool    is_closed() const noexcept { return obj->state == 0; }
-    bool is_available() const noexcept { return obj->state == 1; }
+    bool    is_closed() const noexcept { return !is_available(); }
+    bool is_available() const noexcept { return obj->state & STATE_ZLIB_OPEN; }
     
     /*─······································································─*/
 
     string_t update_inflate( string_t data, int mode=Z_PARTIAL_FLUSH ) const noexcept {
-        if( is_closed() || data.size() == 0 || obj->mode < 0 ){ return nullptr; }
+        if( is_closed() || data.size() == 0 || is_deflate() ){ return nullptr; }
 
-        if( obj->mode == 0 ){ if( inflateInit2( &obj->fd, obj->type ) != Z_OK ){ 
+        if( !is_inflate() ){ if( inflateInit2( &obj->fd, obj->type ) != Z_OK ){ 
             onError.emit( "Failed to initialize zlib for decompression." ); close(); return nullptr;
-        } onOpen.emit(); obj->mode = 1; } string_t output; ulong size =0;
+        }   onOpen .emit(); obj->state |= STATE::STATE_ZLIB_INFLATE; } string_t output; ulong size =0;
         
             obj->fd.avail_in = data.size();
             obj->fd.avail_out= obj->bff.size();
@@ -114,11 +124,11 @@ public:
     }
 
     string_t update_deflate( string_t data, int mode=Z_PARTIAL_FLUSH ) const noexcept { 
-        if( is_closed() || data.size() == 0 || obj->mode > 0 ){ return nullptr; }
+        if( is_closed() || data.size() == 0 || is_inflate() ){ return nullptr; }
         
-        if( obj->mode == 0 ){ if( deflateInit2( &obj->fd, Z_DEFAULT_COMPRESSION, Z_DEFLATED, obj->type, 8, Z_DEFAULT_STRATEGY ) != Z_OK ){ 
+        if( !is_deflate() ){ if( deflateInit2( &obj->fd, Z_DEFAULT_COMPRESSION, Z_DEFLATED, obj->type, 8, Z_DEFAULT_STRATEGY ) != Z_OK ){ 
             onError.emit( "Failed to initialize zlib for compression." ); close(); return nullptr;
-        } onOpen.emit(); obj->mode = -1; } string_t output; ulong size =0;
+        }   onOpen .emit(); obj->state |= STATE::STATE_ZLIB_DEFLATE; } string_t output; ulong size =0;
 
             obj->fd.avail_in = data.size();
             obj->fd.avail_out= obj->bff.size();

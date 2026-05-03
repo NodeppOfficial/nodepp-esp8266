@@ -14,11 +14,45 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define ARDUINO_RESET()    do { void(*callback) (void) = 0; /*-*/ callback(); } while(0)
-#ifndef ARDUINO_ALLOW_EXCEPTION
-#define ARDUINO_ERROR(...) do { console::error(__VA_ARGS__); ARDUINO_RESET(); } while(0)
+#ifndef NODEPP_ALLOW_THREADS
+#define NODEPP_ALLOW_THREADS 1
+#endif
+
+#ifndef NODEPP_ALLOW_STD_SUPPORT
+#define NODEPP_ALLOW_STD_SUPPORT 0
+#endif
+
+#ifndef NODEPP_ALLOW_THROW_EXCEPTION
+#define NODEPP_ALLOW_THROW_EXCEPTION 0
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#define NODEPP_SCHEDULER_IOURING 5
+#define NODEPP_SCHEDULER_IOCP    4
+#define NODEPP_SCHEDULER_KQUEUE  3 
+#define NODEPP_SCHEDULER_NPOLL   2
+#define NODEPP_SCHEDULER_EPOLL   1
+#define NODEPP_SCHEDULER_LITE    0
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#if defined(_POSIX_THREADS) && _POSIX_THREADS>0 && NODEPP_ALLOW_THREADS==1
+#define NODEPP_THREAD_SUPPORTED
 #else
-#define ARDUINO_ERROR(...) throw except_t( __VA_ARGS__ )
+#define thread_local /*unused*/
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#define ARDUINO_RESET() ESP.restart()
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#if NODEPP_ALLOW_THROW_EXCEPTION==1
+#define NODEPP_THROW_ERROR(...) do { throw nodepp::except_t(__VA_ARGS__); } while(0)
+#else
+#define NODEPP_THROW_ERROR(...) do { nodepp::console::error(__VA_ARGS__); ARDUINO_RESET(); } while(0)
 #endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -27,41 +61,61 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define coDelay(VALUE)           do { _time_=process::millis()+VALUE; while( process::millis()<_time_ ){ coErrno(VALUE,_LINE_,1); }} while(0);
-#define coUDelay(VALUE)          do { _time_=process::micros()+VALUE; while( process::micros()<_time_ ){ coNext; }} while(0);
-#define coErrno(DELAY,STATE,OUT) do { coSet(STATE); coroutine::getno( OUT,coGet,DELAY ); return OUT; case STATE:; } while(0);
+#if defined(NODEPP_EVENT_SCHEDULER) && (NODEPP_EVENT_SCHEDULER==NODEPP_SCHEDULER_LITE)
+
+   #define coDelay(VALUE) do { _time_=nodepp::process::millis()+VALUE; while( nodepp::process::millis()<_time_ ){ coNext; }} while(0);
+   #define coUDelay(VALUE)do { _time_=nodepp::process::micros()+VALUE; while( nodepp::process::micros()<_time_ ){ coNext; }} while(0);
+
+   #define coGoto(VALUE)  do { coSet( VALUE ); /*---------*/ return 1; } while(0);
+   #define coStay(VALUE)  do { coSet( VALUE ); /*---------*/ return 0; } while(0);
+   #define coNext         do { coSet(_LINE_ ); case _LINE_:; return 1; } while(0);
+   #define coYield(VALUE) do { coSet( VALUE ); case VALUE :; return 1; } while(0);
+   #define coWait(VALUE)  do { while( VALUE ){ /*---------*/ coNext ; }} while(0);
+   #define coEnd          do { _time_=0; _state_=_time_; /*---------*/ } while(0); return -1;
+   #define coStop            } _time_=0; _state_=_time_; /*---------*/ } while(0); return -1;
+
+   #define coStart thread_local static int _state_=0; thread_local static ulong _time_=0; coBegin
+   #define coBegin do { switch(_state_) { case 0:;
+   #define coEmit  int operator()
+
+   #define coSet(VALUE) _state_ = VALUE
+   #define coGet        _state_
+   #define coFinish     coStop
+
+#else 
+
+   #define coDelay(VALUE)           do { _time_=nodepp::process::millis()+VALUE; while( nodepp::process::millis()<_time_ ){ coErrno(VALUE,_LINE_,1); }} while(0);
+   #define coUDelay(VALUE)          do { _time_=nodepp::process::micros()+VALUE; while( nodepp::process::micros()<_time_ ){ /*------------*/ coNext; }} while(0);
+   #define coErrno(DELAY,STATE,OUT) do { coSet(STATE);  nodepp ::coroutine::getno( OUT,coGet,DELAY ); return OUT; case STATE:; } while(0);
+
+   #define coGoto(VALUE)  do { coSet( VALUE ); nodepp::coroutine::getno(1,coGet); return 1; } while(0);
+   #define coStay(VALUE)  do { coSet( VALUE ); nodepp::coroutine::getno(0,coGet); return 0; } while(0);
+   #define coNext         do { coErrno(0UL,_LINE_,1); /*---------------------------------*/ } while(0);
+   #define coYield(VALUE) do { coErrno(0UL, VALUE,1); /*---------------------------------*/ } while(0);
+   #define coWait(VALUE)  do { while( VALUE ){ /*-------------------------------*/ coNext; }} while(0);
+   #define coEnd          do { _time_=0; _state_=_time_; /**/ nodepp::coroutine::getno(-1); } while(0); return -1;
+   #define coStop            } _time_=0; _state_=_time_; /**/ nodepp::coroutine::getno(-1); } while(0); return -1;
+
+   #define coStart thread_local static int _state_=0; thread_local static ulong _time_=0; coBegin
+   #define coBegin do { switch(_state_) { case 0:; nodepp::coroutine::getno(-2);
+   #define coEmit  int operator()
+
+   #define coSet(VALUE) _state_ = VALUE
+   #define coGet        _state_
+   #define coFinish     coStop
+
+#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define coGoto(VALUE)  do { coSet( VALUE ); coroutine::getno(1,coGet); return 1; } while(0);
-#define coStay(VALUE)  do { coSet( VALUE ); coroutine::getno(0,coGet); return 0; } while(0);
-#define coNext         do { coErrno(0UL,_LINE_,1); /*-------------------------*/ } while(0);
-#define coYield(VALUE) do { coErrno(0UL, VALUE,1); /*-------------------------*/ } while(0);
-#define coWait(VALUE)  do { while( VALUE ){ /*------------------------*/ coNext;}} while(0);
-#define coEnd          do { _time_=0; _state_=_time_; /**/ coroutine::getno(-1); } while(0); return -1;
-#define coStop            } _time_=0; _state_=_time_; /**/ coroutine::getno(-1); } while(0); return -1;
+#define onMain NODEPP_BEGIN(); void setup(){ \
+/*----------*/ NODEPP_BEGIN();               \
+} void loop(){ nodepp::process::next(); } void NODEPP_BEGIN
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define coStart  thread_local static int _state_=0; thread_local static ulong _time_=0; coBegin
-#define coBegin  do { switch(_state_) { case 0:; coroutine::getno(-2);
-#define coEmit   int operator()
-
-#define coSet(VALUE) _state_ = VALUE
-#define coGet        _state_
-#define coFinish     coStop
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
-#define onMain INIT(); void setup(){ \
-       process::start(); INIT();     \
-} void loop(){ process::next();      \
-} void INIT
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
+#define GENERATOR(NAME) struct NAME : public nodepp::generator_t
 #define COROUTINE()     [=]( int& _state_, ulong& _time_ )
-#define GENERATOR(NAME) struct NAME : public generator_t
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -80,7 +134,6 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define _JSON_(...) json::parse(_STRING_(__VA_ARGS__))
 #define _FUNC_  __PRETTY_FUNCTION__
 #define _STRING_(...) #__VA_ARGS__
 #define _NAME_  __FUNCTION__
@@ -97,16 +150,13 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define TIMEOUT         process::get_timeout()
-
-#define HASH_TABLE_SIZE 16
-#define MAX_POOL_SIZE    8
-#define MAX_SSO         32
-#define MAX_BATCH       16
-#define MAX_PATH        1024
-#define UNBFF_SIZE      128
-#define MAX_SOCKET      64
-#define CHUNK_SIZE      1024
+#define NODEPP_MAX_SOCKET       10
+#define NODEPP_MAX_BATCH_SIZE   8
+#define NODEPP_MAX_SSO_SIZE     8
+#define NODEPP_HASH_TABLE_SIZE  8
+#define NODEPP_MAX_PATH_SIZE    1024
+#define NODEPP_UNBFF_SIZE       1024
+#define NODEPP_CHUNK_SIZE       4096
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -243,7 +293,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#define typeof(DATA) string_t( typeid(DATA).name() )
+#define typeof(DATA) nodepp::string_t( typeid(DATA).name() )
 
 #define ullong  unsigned long long int
 #define ulong   unsigned long int
@@ -267,17 +317,15 @@
 #define uchar16 unsigned int
 #define uchar32 unsigned long int
 
-#if !defined(_SYS_TYPES_H_) || _OS_ == NODEPP_OS_ANDROID
-    #define  _SYS_TYPES_H_
-
 #define ushort unsigned short
 #define uint   unsigned int
 
-#endif
-
 /*────────────────────────────────────────────────────────────────────────────*/
 
-using null_t = decltype( nullptr );
+namespace nodepp {
+static bool& NODEPP_SHTDWN(){ static bool out=false; return out; }
+/*--*/ using null_t = decltype( nullptr );
+}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

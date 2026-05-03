@@ -16,6 +16,7 @@
 
 #if _KERNEL_ == NODEPP_KERNEL_ARDUINO
     #include "mutex.h"
+    #include "expected.h"
     #include "arduino/worker.h"
 #else
     #error "This OS Does not support worker.h"

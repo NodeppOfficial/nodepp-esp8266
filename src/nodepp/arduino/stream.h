@@ -9,22 +9,16 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_SERIAL
-#define NODEPP_SERIAL
+#ifndef NODEPP_ARDUINO_STREAM
+#define NODEPP_ARDUINO_STREAM
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "event.h"
-#include "generator.h"
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
-namespace nodepp { class serial_t {
+namespace nodepp { template< class T > class stream_t {
 protected:
 
     void kill() const noexcept { 
-        obj->state |= STATE::FS_STATE_KILL;
-        Serial.end(); 
+         obj->state |= STATE::FS_STATE_KILL;
     }
 
     bool is_state( uchar value ) const noexcept {
@@ -53,6 +47,7 @@ protected:
 
         ulong       range[2] = { 0, 0 };
         int         feof     = 1;
+        T           fd;
         uchar       state    = STATE::FS_STATE_OPEN;
 
         ptr_t<char> buffer; string_t borrow;
@@ -60,6 +55,8 @@ protected:
         generator::file::line  _line ;
         generator::file::read  _read ;
         generator::file::write _write;
+
+       ~NODE(){ fd.end(); }
     };  ptr_t<NODE> obj;
 
 public:
@@ -75,14 +72,10 @@ public:
 
     /*─······································································─*/
 
-    serial_t( const uchar& port, const ulong& _size=CHUNK_SIZE ) noexcept : obj( new NODE() ) {
-        Serial.begin( port ); set_buffer_size( _size );
-    }
-
-   ~serial_t() noexcept { if( obj.count()>1 && !is_closed() ){ return; } free(); }
+   ~stream_t() noexcept { if( obj.count()>1 && !is_closed() ){ return; } free(); }
     
-    serial_t( const ulong& _size=CHUNK_SIZE ) noexcept : obj( new NODE() ) { 
-        set_buffer_size( _size ); 
+    stream_t( const T& fd, const ulong& _size=NODEPP_CHUNK_SIZE ) noexcept : obj( new NODE() ) { 
+        obj->fd = fd; set_buffer_size( _size ); 
     }
 
     /*─······································································─*/
@@ -94,17 +87,17 @@ public:
 
     /*─······································································─*/
 
-    void  resume() const noexcept { if(is_state(STATE::FS_STATE_OPEN )){ return; } set_state(STATE::FS_STATE_OPEN ); onResume.emit(); }
-    void    stop() const noexcept { if(is_state(STATE::FS_STATE_REUSE)){ return; } set_state(STATE::FS_STATE_REUSE); onDrain .emit(); }
+    void  resume() const noexcept { if(is_state(STATE::FS_STATE_OPEN )){ return; } onResume.emit(); set_state(STATE::FS_STATE_OPEN ); }
+    void    stop() const noexcept { if(is_state(STATE::FS_STATE_REUSE)){ return; } onDrain .emit(); set_state(STATE::FS_STATE_REUSE); }
     void   reset() const noexcept { if(is_state(STATE::FS_STATE_KILL )){ return; } resume(); pos(0); }
     void   flush() const noexcept { obj->buffer.fill(0); }
 
     /*─······································································─*/
 
     void close() const noexcept {
-        if( is_state ( STATE::FS_STATE_DISABLE ) ){ return; }
-            set_state( STATE::FS_STATE_CLOSE   );
-    onDrain.emit(); free(); }
+        if( is_state ( STATE::FS_STATE_DISABLE ) ) { return; }
+            onDrain.emit(); set_state( STATE::FS_STATE_CLOSE );
+    free(); }
 
     /*─······································································─*/
 
@@ -140,14 +133,16 @@ public:
 
     void free() const noexcept {
 
-        if( is_state( STATE::FS_STATE_REUSE ) && !is_feof() && obj.count()>1 ){ return; }
-        if( is_state( STATE::FS_STATE_KILL  ) ) /*-------*/ { return; } 
-        if(!is_state( STATE::FS_STATE_CLOSE | STATE::FS_STATE_REUSE ) )
-          { kill(); onDrain.emit(); } else { kill(); }
+        if( is_state( STATE::FS_STATE_REUSE ) && !is_feof() && obj.count()>1 ) { return; }
+        if( is_state( STATE::FS_STATE_KILL  ) ){ return; } /*-----------------*/ kill();
+        if(!is_state( STATE::FS_STATE_CLOSE | STATE::FS_STATE_REUSE ) ){ onDrain.emit(); }
        
+        onClose.emit();
+
         onUnpipe.clear(); onResume.clear();
-        onError .clear(); onData  .clear(); 
-        onOpen  .clear(); onPipe  .clear(); onClose.emit();
+        onError .clear(); onData  .clear();
+        onOpen  .clear(); /*-------------*/
+        onPipe  .clear(); onClose .clear();
 
     }
 
@@ -180,7 +175,7 @@ public:
 
     /*─······································································─*/
 
-    string_t read( ulong size=CHUNK_SIZE ) const noexcept {
+    string_t read( ulong size=NODEPP_CHUNK_SIZE ) const noexcept {
         while( obj->_read( this, size ) == 1 )
              { process::next(); }
         return obj->_read.data;
@@ -201,25 +196,25 @@ public:
 
     virtual int __read( char* bf, const ulong& sx ) const noexcept {
         if( is_closed() ){ return -1; } if( sx==0 ){ return 0; }
-        if(!Serial.available() ){ obj->feof=-2; return -2; }
+        if(!obj->fd.available() ){ obj->feof=-2; return -2; }
 
         char x = 0; obj->feof = 0;
 
-        do { x = Serial.read();
+        do { x = obj->fd.read();
         if ( sx==obj->feof ){ break; }
         if ( x == -1 )      { break; }
              bf[obj->feof] = x;
              obj->feof++;
         } while( true );
 
-        Serial.flush(); return obj->feof;
+        obj->fd.flush(); return obj->feof;
     }
 
     virtual int __write( char* bf, const ulong& sx ) const noexcept {
         if( is_closed() ){ return -1; } if( sx==0 )/**/{ return 0; }
-        if(!Serial.availableForWrite() ){ obj->feof=-2; return -2; }
-        obj->feof= Serial.write( bf, sx );
-        Serial.flush(); return obj->feof;
+        if(!obj->fd.availableForWrite() ){ obj->feof=-2; return -2; }
+        obj->feof= obj->fd.write( bf, sx );
+        obj->fd.flush(); return obj->feof;
     }
 
     /*─······································································─*/

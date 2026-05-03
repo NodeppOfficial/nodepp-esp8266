@@ -14,7 +14,7 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <unistd.h>
+#include "lwip/dns.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -29,78 +29,57 @@ namespace nodepp { namespace dns {
     thread_local static regex_t reg ( "([0-9a-fA-F]+\\:)+[0-9a-fA-F]+" );
         reg.clear_memory(); return reg.test( URL ) ? 1 : 0; 
     }
+
+    /*─······································································─*/
+
+namespace {
+
+    static void dns_callback(const char *name, const ip_addr_t *ipaddr, void *callback_arg) {
+        auto res_ptr = (res_t<string_t>*) callback_arg;
+
+        if (ipaddr != NULL) {
+            char ip_str[16];
+            ipaddr_ntoa_r(ipaddr, ip_str, sizeof(ip_str));
+            (*res_ptr)( string_t(ip_str) ); // Resolvemos la promesa
+        } else {
+            // Error de DNS (ej. host no encontrado)
+            // Aquí deberías manejar el reject de la promesa
+        }
+        delete res_ptr; // Limpiamos el puntero temporal
+    }
+
+}
     
     /*─······································································─*/
 
-    inline string_t lookup_ipv6( string_t host ) { _socket_::start_device();
+    promise_t<string_t, except_t> dns_lookup( string_t host ) {
+        return promise_t<string_t, except_t>([=]( res_t<string_t> res, rej_t<except_t> rej ){
 
-        if  ( host == "broadcast" || host == "::2" ){ return "::2"; } 
-        elif( host == "localhost" || host == "::1" ){ return "::1"; } 
-        elif( host == "global"    || host == "::0" ){ return "::0"; }
-        elif( host == "loopback"  || host == "::3" ){ return "::3"; }
+            ip_addr_t resolved_ip;
+            // Creamos un puntero persistente para el callback
+            auto arg = new res_t<string_t>(res);
 
-        if( url::is_valid(host) ){ host = url::hostname(host); }
+            // Intentamos resolver
+            err_t err = dns_gethostbyname(host.c_str(), &resolved_ip, dns_callback, arg);
 
-        addrinfo hints, *res; memset(&hints,0,sizeof(hints));
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_family   = AF_UNSPEC;
-        hints.ai_flags    = AI_PASSIVE;
-
-        if( getaddrinfo( host.get(), nullptr, &hints, &res ) != 0 )
-          { return nullptr; }
-
-        char ipstr[INET6_ADDRSTRLEN]; string_t ipAddress;
-        while ( res != nullptr ) { void *addr = nullptr; 
-            if( res->ai_family == AF_INET6 ) {
-                struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)res->ai_addr;
-                addr = &(ipv6->sin6_addr);
-            } if ( addr != nullptr ){
-                 inet_ntop( res->ai_family, addr, ipstr, sizeof(ipstr) );
-            }    ipAddress = ipstr; res = res->ai_next;
-        }
-
-        freeaddrinfo(res); return ipAddress;
+            if (err == ERR_OK) {
+                // Caso A: Estaba en caché, resolvemos de inmediato
+                char ip_str[16];
+                ipaddr_ntoa_r(&resolved_ip, ip_str, sizeof(ip_str));
+                res( string_t(ip_str) );
+                delete arg;
+            } else if (err != ERR_INPROGRESS) {
+                // Caso B: Error inmediato (ej. DNS no configurado)
+                rej( except_t("DNS Lookup Failed") );
+                delete arg;
+            }
+            // Caso C: ERR_INPROGRESS. No hacemos nada, esperamos al callback.
+        });
     }
     
     /*─······································································─*/
 
-    inline string_t lookup_ipv4( string_t host ) { _socket_::start_device();
-
-        if  ( host == "255.255.255.255" || host == "broadcast" ){ return "255.255.255.255"; } 
-        elif( host == "127.0.0.1"       || host == "localhost" ){ return "127.0.0.1"; } 
-        elif( host == "0.0.0.0"         || host == "global"    ){ return "0.0.0.0"; }
-        elif( host == "1.1.1.1"         || host == "loopback"  ){ return "1.1.1.1"; }
-
-        if( url::is_valid(host) ){ host = url::hostname(host); }
-
-        addrinfo hints, *res; memset(&hints,0,sizeof(hints));
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_family   = AF_UNSPEC;
-        hints.ai_flags    = AI_PASSIVE;
-
-        if( getaddrinfo( host.get(), nullptr, &hints, &res ) != 0 )
-          { return nullptr; }
-
-        char ipstr[INET_ADDRSTRLEN]; string_t ipAddress;
-        while ( res != nullptr ) { void *addr = nullptr; 
-            if( res->ai_family == AF_INET ) {
-                struct sockaddr_in *ipv4 = (struct sockaddr_in *)res->ai_addr;
-                addr = &(ipv4->sin_addr);
-            } if ( addr != nullptr ){
-                 inet_ntop( res->ai_family, addr, ipstr, sizeof(ipstr) );
-            }    ipAddress = ipstr; res = res->ai_next;
-        }
-
-        freeaddrinfo(res); return ipAddress;
-    }
-    
-    /*─······································································─*/
-
-    inline string_t lookup( string_t host ) { return lookup_ipv4( host ); }
-    
-    /*─······································································─*/
-
-    inline string_t get_hostname(){
+    inline expected_t<ip_t,except_t> get_host_data(){
         auto socket = socket_t();
             
         socket.SOCK    = SOCK_DGRAM;
@@ -108,8 +87,7 @@ namespace nodepp { namespace dns {
         socket.socket ( "loopback", 0 );
         socket.connect();
 
-        return socket.get_sockname();
-    }
+    return socket.get_sockname(); }
     
     /*─······································································─*/
 
@@ -118,6 +96,141 @@ namespace nodepp { namespace dns {
         if( is_ipv4(URL) > 0 ){ return 1; }
         if( is_ipv6(URL) > 0 ){ return 1; } return 0;
     }
+
+}}
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+/*
+ * Copyright 2023 The Nodepp Project Authors. All Rights Reserved.
+ *
+ * Licensed under the MIT (the "License").  You may not use
+ * this file except in compliance with the License.  You can obtain a copy
+ * in the file LICENSE in the source distribution or at
+ * https://github.com/NodeppOfficial/nodepp/blob/main/LICENSE
+ */
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#ifndef NODEPP_POSIX_DNS
+#define NODEPP_POSIX_DNS
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp {  struct dns_t { string_t address, hostname; int family; }; }
+namespace nodepp { namespace dns {
+
+    inline bool is_ipv6( const string_t& URL ){ 
+    thread_local static regex_t reg ( "([0-9a-fA-F]+\\:)+", true );
+        reg.clear_memory(); return reg.test( URL ) ? 1 : 0; 
+    }
+    
+    inline bool is_ipv4( const string_t& URL ){ 
+    thread_local static regex_t reg ( "([0-9]+\\.)+[0-9]+" );
+        reg.clear_memory(); return reg.test( URL ) ? 1 : 0; 
+    }
+    
+    /*─······································································─*/
+
+    inline bool is_ip( const string_t& URL ){ 
+        if( URL.empty( ) ){ return 0; }
+        if( is_ipv4(URL) ){ return 1; }
+        if( is_ipv6(URL) ){ return 1; } return 0;
+    }
+    
+    /*─······································································─*/
+
+    inline ptr_t<dns_t> lookup( string_t host, int family = AF_UNSPEC ) { 
+        _socket_::start_device();
+
+        if( family == AF_INET ) {
+
+            if( host == "broadcast" || host == "255.255.255.255" ){
+                dns_t tmp ({ "255.255.255.255", host, AF_INET }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "localhost" || host == "127.0.0.1" ){ 
+                dns_t tmp ({ "127.0.0.1", host, AF_INET }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "global"    || host == "0.0.0.0" ){ 
+                dns_t tmp ({ "0.0.0.0", host, AF_INET }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "loopback"  || host == "1.1.1.1" ){
+                dns_t tmp ({ "1.1.1.1", host, AF_INET }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+
+        }  elif( family == AF_INET6 )  {
+
+            if( host == "broadcast" || host == "::2" ){
+                dns_t tmp ({ "::2", host, AF_INET6 }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "localhost" || host == "::1" ){ 
+                dns_t tmp ({ "::1", host, AF_INET6 }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "global"    || host == "::0" ){ 
+                dns_t tmp ({ "::0", host, AF_INET6 }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+            elif( host == "loopback"  || host == "::3" ){ 
+                dns_t tmp ({ "::3", host, AF_INET6 }); 
+                return ptr_t<dns_t>( 1UL, tmp );
+            }
+
+        }   
+        
+        addrinfo hints, *res, *ptr; memset( &hints, 0, sizeof(hints) );
+        if( url::is_valid(host) ){ host = url::hostname(host); }
+        
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_family   = family     ;
+        hints.ai_flags    = AI_PASSIVE ;
+
+        if( getaddrinfo( host.get(), nullptr, &hints, &res ) != 0 )
+          { return nullptr; }
+
+        string_t ipAddress ; char ipstr[INET6_ADDRSTRLEN]; 
+        queue_t<dns_t> list;
+
+        for( ptr = res; ptr != nullptr; ptr = ptr->ai_next ) {
+             void *addr = nullptr;
+
+            if( ptr->ai_family == AF_INET ) {
+                addr = &((struct sockaddr_in*) ptr->ai_addr)->sin_addr;
+            } elif ( ptr->ai_family == AF_INET6 ) {
+                addr = &((struct sockaddr_in6*)ptr->ai_addr)->sin6_addr;
+            }
+
+            if( addr ) {
+                inet_ntop( ptr->ai_family, addr, ipstr, sizeof(ipstr) );
+                list.push( dns_t({ ipstr, host, ptr->ai_family }) );
+                if ( family != AF_UNSPEC ){ break; }
+            }
+
+        }
+
+        freeaddrinfo(res); return list.data();
+    }
+    
+    /*─······································································─*/
+
+    inline expected_t<ip_t,except_t> get_host_data(){
+        auto socket = socket_t();
+            
+        socket.SOCK    = SOCK_DGRAM ;
+        socket.IPPROTO = IPPROTO_UDP;
+        socket.socket ( "loopback", 0 );
+        socket.connect();
+
+    return socket.get_sockname(); }
 
 }}
 

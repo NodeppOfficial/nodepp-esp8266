@@ -9,15 +9,15 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_ESP8266_FS
-#define NODEPP_ESP8266_FS
+#ifndef NODEPP_ARDUINO_FS
+#define NODEPP_ARDUINO_FS
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { namespace fs {
 
-    inline file_t readable( const string_t& path, const ulong& _size=CHUNK_SIZE ){ return file_t( path, "r", _size ); }
-    inline file_t writable( const string_t& path, const ulong& _size=CHUNK_SIZE ){ return file_t( path, "w", _size ); }
+    inline file_t readable( const string_t& path, const ulong& _size=NODEPP_CHUNK_SIZE ){ return file_t( path, "r", _size ); }
+    inline file_t writable( const string_t& path, const ulong& _size=NODEPP_CHUNK_SIZE ){ return file_t( path, "w", _size ); }
 
     /*─······································································─*/
 
@@ -46,7 +46,7 @@ namespace nodepp { namespace fs {
             while( fl1->is_available() ){
                 
                 coWait( (*rd1)( &fl1 ) == 1 );
-                if( rd1->state==0 ){ break; }
+                if( rd1->state<=0 ){ break; }
 
                *bff += rd1->data;
 
@@ -64,8 +64,6 @@ namespace nodepp { namespace fs {
         res_t<ulong> res, rej_t<except_t> rej
     ){
         
-        if( !exists_file( path ) ){ rej( "file not found" ); return; }
-
         auto rd1 = type::bind( generator::file::write() );
         auto fl1 = type::bind( file_t( path, "w" ) );
         auto bff = ptr_t<ulong>( 0UL, 0UL );
@@ -76,7 +74,7 @@ namespace nodepp { namespace fs {
             while( fl1->is_available() ){
                 
                 coWait( (*rd1)( &fl1, message ) == 1 );
-                if( rd1->state==0 ){ break; }
+                if( rd1->state<=0 ){ break; }
 
                *bff += rd1->state;
 
@@ -106,7 +104,7 @@ namespace nodepp { namespace fs {
             while( fl1->is_available() ){
                 
                 coWait( (*rd1)( &fl1, message ) == 1 );
-                if( rd1->state==0 ){ break; }
+                if( rd1->state<=0 ){ break; }
 
                *bff += rd1->state;
 
