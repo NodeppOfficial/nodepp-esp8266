@@ -14,6 +14,403 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#ifndef NODEPP_REGEX_ENGINE
+#if ( _KERNEL_==NODEPP_KERNEL_ARDUINO ) || ( _KERNEL_==NODEPP_KERNEL_WASM )
+    #define NODEPP_REGEX_ENGINE NODEPP_REGEX_LITE
+#else
+    #define NODEPP_REGEX_ENGINE NODEPP_REGEX_GRPH
+#endif
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#if ( NODEPP_REGEX_ENGINE == NODEPP_REGEX_GRPH )
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { class regex_t : public generator_t {
+protected:
+
+    struct REGEX {
+        uchar /*----*/ flag, data;
+        queue_t<REGEX> next;
+        ptr_t<int>     rep;
+    };
+
+    struct NODE {
+        REGEX queue; bool icase=0;
+        queue_t<string_t> memory ;
+    };  ptr_t<NODE> obj;
+
+    /*─······································································─*/
+
+    ptr_t<int> get_next_repeat( const string_t& pattern, ulong& off ) const noexcept {
+
+        if( pattern[off] == '{' ){
+            auto end = get_next_key( pattern, off ); /*------*/
+            auto out = get_rep( pattern, off, end ); off = end;
+        return out; }
+
+        elif( pattern[off]=='?' ){ return ptr_t<int>({ 0, 1 }); }
+        elif( pattern[off]=='*' ){ return ptr_t<int>({ 0,-1 }); }
+        elif( pattern[off]=='+' ){ return ptr_t<int>({ 1,-1 }); }
+
+    return nullptr; }
+
+    ptr_t<int> get_rep( const string_t& pattern, int start, int end ) const noexcept {
+    ptr_t<int>     rep({ 0, 0 }); 
+    
+        bool b=0; string_t num[2];
+
+        pattern.slice_view( start+1, end ).map([&]( char& data ){
+            if  (!string::is_digit(data) ){ b =! b; }
+            elif( string::is_digit(data) ){ num[b].push(data); }
+        });
+
+        if( !num[0].empty() ){ rep[0] =string::to_int(num[0]);
+        /*------------------*/ rep[1] =string::to_int(num[0]); }
+        if( !num[1].empty() ){ rep[1] =string::to_int(num[1]); }
+
+    return rep; }
+
+    ptr_t  <int> get_next_regex( const string_t& pattern, ulong off ) const noexcept {
+    queue_t<int> out;
+
+        while( off < pattern.size() ){
+           if( pattern[off] == '|' ){ out.push(off); off++; }
+           if( pattern[off] == '[' || /*-------------------*/
+               pattern[off] == '{' || /*-------------------*/
+               pattern[off] == '(' // /*-------------------*/
+           ) { off = get_next_key( pattern,off ); continue; }
+           if( pattern[off] == '\\'){ ++off; } /*-*/ ++off;
+        }
+
+    out.push( pattern.size() ); return out.data(); }
+
+    ulong get_next_key( const string_t& pattern, ulong off ) const noexcept {
+    uchar k=0; while( off < pattern.size() && k < 128 ){
+
+        switch( pattern[off] ){ /**/ case '\\': ++off ; break;
+            case '[': k += 1; break; case ']' : k -= 1; break;
+            case '(': k += 2; break; case ')' : k -= 2; break;
+            case '{': k += 3; break; case '}' : k -= 3; break;
+        }   if( k==0 ) /**/ { break; }
+
+    ++off; } return off; }
+
+    /*─······································································─*/
+
+    REGEX compile_range( const string_t& pattern ) const {
+    REGEX node; auto next = &node.next;
+
+        for( ulong x=0; x<pattern.size(); ++x ){
+        if ( pattern[x] == '\\' ){ /*--*/ ++x;
+        if ( x < pattern.size() ){ REGEX item; item.flag=0x00; item.data=pattern[x]; next->push(item); }
+        } elif ( pattern[x+1]=='-' && (x+2)<pattern.size() ){
+            auto a = min( pattern[x], pattern[x+2] ); /*---*/
+            auto b = max( pattern[x], pattern[x+2] ); x += 2;
+            for( uchar y=a; y<=b; ++y )
+               { REGEX item; item.flag=0x00; item.data=y; /*----*/ next->push(item); }
+        } else { REGEX item; item.flag=0x00; item.data=pattern[x]; next->push(item); }}
+
+    return node; }
+
+    /*─······································································─*/
+
+    REGEX compile_pattern( const string_t& pattern ) const {
+    ulong off=0; REGEX node; node.data=0x00; node.flag=0x09;
+    do { /*---*/ REGEX item; item.data=0x00; item.flag=0xff;
+
+        if( pattern[off] == ']' || pattern[off] == '{' ||
+            pattern[off] == '}' || pattern[off] == ')' // regex error handling
+        ) { NODEPP_THROW_ERROR(string::format( "regex: %d %c", off, pattern[off] )); }
+
+        elif( pattern[off]=='[' ){ ulong end=0; 
+        if(( end=get_next_key(pattern,off) ) >= pattern.size() ){
+            NODEPP_THROW_ERROR(string::format( "regex: %d %c", off, pattern[off] ));
+        }   int beg = pattern[off+1]=='^'? off+2:off+1;
+            item=compile_range(pattern.slice_view(beg,end));
+            item.data=pattern[off+1]=='^'? 0xff : 0x00;
+            item.flag=0x08; off=end; /*--------------*/
+        }
+
+        elif( pattern[off]== '(' ){ ulong end=0; 
+        if(( end=get_next_key(pattern,off) ) >= pattern.size() ){
+            NODEPP_THROW_ERROR(string::format( "regex: %d %c", off, pattern[off] ));
+        }   item=compile(pattern.slice_view( off+1, end ));
+            item.data=0xff; item.flag=0x09; off=end;
+        }
+
+        elif( pattern[off] == '$' ){ item.data=0x00; item.flag=0x01; }
+        elif( pattern[off] == '^' ){ item.data=0x00; item.flag=0x02; }
+        elif( pattern[off] == '.' ){ item.data=0x00; item.flag=0x0c; }
+
+        elif( pattern[off] == '\\'){ ++off; /*---------------------*/
+        if  ( pattern[off] == 'b' ){ item.data=0xff; item.flag=0x03; }
+        elif( pattern[off] == 'B' ){ item.data=0x00; item.flag=0x03; }
+        elif( pattern[off] == 'w' ){ item.data=0xff; item.flag=0x04; }
+        elif( pattern[off] == 'W' ){ item.data=0x00; item.flag=0x04; }
+        elif( pattern[off] == 'd' ){ item.data=0xff; item.flag=0x05; }
+        elif( pattern[off] == 'D' ){ item.data=0x00; item.flag=0x05; }
+        elif( pattern[off] == 's' ){ item.data=0xff; item.flag=0x06; }
+        elif( pattern[off] == 'S' ){ item.data=0x00; item.flag=0x06; }
+        elif( pattern[off] == 'n' ){ item.data=0xff; item.flag=0x07; }
+        elif( pattern[off] == 'N' ){ item.data=0x00; item.flag=0x07; }
+
+        else{ item.data=pattern[off]; item.flag=0x00; }}
+        else{ item.data=pattern[off]; item.flag=0x00; }
+
+        if( pattern[off+1] == '+' || pattern[off+1] == '?' ||
+            pattern[off+1] == '*' || pattern[off+1] == '{' //
+        ) { off++; item.rep=get_next_repeat( pattern,off ); }
+
+        node.next.push(item);
+
+    } while( ++off < pattern.size() ); return node; }
+
+    /*─······································································─*/
+
+    REGEX compile( const string_t& pattern ) const {
+    REGEX node; node.data=0x00; node.flag=0x09;
+    do{ if( pattern.empty() ){ break; }
+
+        auto reg =get_next_regex( pattern,0 );
+        auto addr=reg.begin(); ulong x=0, y=0;
+
+        while( addr != reg.end() ){ y=*addr;
+        node.next.push( compile_pattern(pattern.slice_view(x,y)) );
+        x=*addr+1; ++addr; } /*---------------------------------*/
+
+    } while(0); return node; }
+
+    bool comparator( char a, char b ) const noexcept {
+        return obj->icase ? ( string::to_lower(a)==string::to_lower(b) ) 
+                          : ( a == b );
+    }
+
+    /*─······································································─*/
+
+    int _search( string_t value, ulong offset, REGEX item ) const noexcept {
+    int rep=0; ulong tmp=offset;
+
+        /*─·································································─*/
+
+        if  ( item.flag==0x02 && item.data==0x00 ){
+        if  ( offset == 0 ) /*-----*/ { return 0; } return -1; }
+
+        elif( item.flag==0x01 && item.data==0x00 ){
+        if  ( offset >= value.last() ){ return 0; } return -1; }
+
+        /*─·································································─*/
+
+        if  ( item.flag==0x0c && item.data==0x00 ){ return 1; }
+
+        elif( item.flag==0x03 && item.data==0x00 ){
+        if(!( offset==0|| offset>=value.last() ) ){ return 1; }}
+
+        elif( item.flag==0x03 && item.data==0xff ){
+        if  ( offset==0|| offset>=value.last()   ){ return 1; }}
+
+        elif( item.flag==0x04 && item.data==0x00 ){
+        if(!( string::is_alnum( value[offset] )) ){ return 1; }}
+
+        elif( item.flag==0x04 && item.data==0xff ){
+        if  ( string::is_alnum( value[offset] )  ){ return 1; }}
+
+        elif( item.flag==0x05 && item.data==0x00 ){
+        if(!( string::is_digit( value[offset] )) ){ return 1; }}
+
+        elif( item.flag==0x05 && item.data==0xff ){
+        if  ( string::is_digit( value[offset] )  ){ return 1; }}
+
+        elif( item.flag==0x06 && item.data==0x00 ){
+        if(!( string::is_space( value[offset] )) ){ return 1; }}
+
+        elif( item.flag==0x06 && item.data==0xff ){
+        if  ( string::is_space( value[offset] )  ){ return 1; }}
+
+        elif( item.flag==0x07 && item.data==0x00 ){
+        if(!( string::is_print( value[offset] )) ){ return 1; }}
+
+        elif( item.flag==0x07 && item.data==0xff ){
+        if  ( string::is_print( value[offset] )  ){ return 1; }}
+
+        /*─·································································─*/
+
+        elif( item.flag==0x08 && item.data==0xff ){
+        if  ( item.next.none([&]( REGEX x ){
+              return comparator( x.data, value[offset] );
+        }) ){ return 1; }}
+
+        elif( item.flag==0x08 && item.data==0x00 ){
+        if  ( item.next.some([&]( REGEX x ){
+              return comparator( x.data, value[offset] );
+        }) ){ return 1; }}
+
+        /*─·································································─*/
+
+        elif( item.flag==0x00 ){ return comparator( item.data, value[offset] ) ? 1 : -1; }
+
+        /*─·································································─*/
+
+        elif( item.flag==0x09 && item.data==0xff ){ auto x=item.next.first();
+        while( x != nullptr ){ /*----------------*/ auto y=x->next;
+        /*---------------------------------------*/ auto z=_search( value, offset, x->data );
+        if  ( z==0 ){ /*-------------------------------------------------*/ x=y; continue; }
+        elif( z>=1 ){ obj->memory.push(value.slice(tmp, tmp+z)); offset=tmp +z ; return z; }
+        else /*--*/ { /*--------------------------------------*/ offset=tmp;x=y; continue; }} return -1; }
+
+        /*─·································································─*/
+
+        else{ auto x = item.next.first(); int out=0; while( x != nullptr ){
+
+        if  ( offset>value.size() ){
+        if  ( x->next != nullptr  ){ return -1; }
+        else /*-----------------*/ { break/**/; }}
+
+        /*-------------*/ auto z =_search( value, offset, x->data );
+        if ( z>= 1 ){ offset +=z; } auto y=x->next; ++rep;
+        /**/ out = type::cast<int>( offset - tmp );
+
+        if  ( x->data.data==0x00 && x->data.flag==0x09 && z>=1 ){ return out; }
+
+        if  ( z>=1 && !x->data.rep.null() ){
+        if  ( -1 ==x->data.rep[1] ){ continue ; }
+        elif( rep>=x->data.rep[1] ){ goto NEXT; }
+        else /*------------------*/{ continue ; }}
+
+        elif( z<0 && !x->data.rep.null() ) {
+        if  ( -1==x->data.rep[1] ){
+        if  ( rep>x->data.rep[0] ){ goto NEXT; } /*-----*/ return  0; }
+        elif( rep>x->data.rep[0] && rep<=x->data.rep[1] ){ goto NEXT; }
+        else /*----------------------------------------*/{ return  0; }}
+
+        if  ( z<0 ){ return 0; }
+
+        NEXT:; x=y; rep=0; } return out; }
+
+        /*─·································································─*/
+
+    return -1; }
+
+public:
+
+    regex_t (): obj( new NODE() ){}
+
+   ~regex_t () noexcept { clear_memory(); }
+
+    regex_t ( const string_t& reg, bool icase=false ): obj( new NODE() )
+    /*---*/ { obj->icase=icase; obj->queue=compile(reg); }
+
+    /*─······································································─*/
+
+    void clear_memory() /*------*/ const noexcept { obj->memory.clear(); }
+
+    array_t<string_t> get_memory() const noexcept { return obj->memory.data(); }
+
+    /*─······································································─*/
+
+    ptr_t<ulong> search( string_t value, ulong off=0 ){
+    ptr_t<ulong> range({ 0, 0 }); while( off < value.size() ) {
+        int c=0; if((c=_search( value, off, obj->queue )) <=0 )
+        { ++off; continue; } /*------------------------------*/
+        range[0]=off; range[1]=off+type::cast<ulong>(c); break;
+    } return range[0]==range[1] ? nullptr : range; }
+
+    /*─······································································─*/
+
+    array_t<ptr_t<ulong>> search_all( const string_t& _str ){
+        queue_t<ptr_t<ulong>> out; ulong off=0; for(;;) {
+            auto idx = search( _str, off );
+            if( idx.null() /**/ ){ return out.data(); }
+            if( idx[0]==idx[1]  ){ return out.data(); } off =idx[1];
+                ptr_t<ulong> mem({ idx[0], idx[1] }); out.push(mem);
+        }   return nullptr;
+    }
+
+    /*─······································································─*/
+
+    array_t<string_t> split_view( const string_t& _str ){ ulong n = 0;
+        auto idx = search_all( _str ); queue_t<string_t> out;
+        if ( idx.empty()  ){ out.push(_str); return out.data(); }
+        for( auto x : idx ){
+             out.push( _str.slice_view( n, x[0] ) ); n = x[1];
+        }    out.push( _str.slice_view( n ) ); return out.data();
+    }
+
+    array_t<string_t> split( const string_t& _str ){ ulong n = 0;
+        auto idx = search_all( _str ); queue_t<string_t> out;
+        if ( idx.empty()  ){ out.push(_str); return out.data(); }
+        for( auto x : idx ){
+             out.push( _str.slice( n, x[0] ) ); n = x[1];
+        }    out.push( _str.slice( n ) ); return out.data();
+    }
+
+    /*─······································································─*/
+
+    string_t replace_all( string_t _str, const string_t& _rep ){
+        auto idx = search_all( _str ).reverse(); for( auto x : idx ){
+             _str.splice( x[0], x[1] - x[0], _rep );
+        }    return _str;
+    }
+
+    string_t replace( string_t _str, const string_t& _rep, ulong off=0 ){
+        auto idx = search( _str, off ); /*----------------------*/
+        if( idx.null() /*-*/ ){ return _str; } /*---------------*/
+        if( idx[0] == idx[1] ){ return _str; } /*---------------*/
+        _str.splice( idx[0], idx[1] - idx[0], _rep ); return _str;
+    }
+
+    /*─······································································─*/
+
+    string_t remove_all( string_t _str ){
+        auto idx = search_all( _str ).reverse(); for( auto x : idx ){
+             _str.splice( x[0], x[1] - x[0] );
+        }    return _str;
+    }
+
+    string_t remove( string_t _str, ulong off=0 ){
+        auto idx = search( _str, off ); /*----------------*/
+        if( idx.null() /*-*/ ){ return _str; }  /*--------*/
+        if( idx[0] == idx[1] ){ return _str; }  /*--------*/
+        _str.splice( idx[0], idx[1] - idx[0] ); return _str;
+    }
+
+    /*─······································································─*/
+
+    array_t<string_t> match_all( const string_t& _str ){
+        auto idx = search_all( _str ); queue_t<string_t> out;
+        for( auto x : idx ){
+             out.push(_str.slice( x[0], x[1] ));
+        }    return out.data();
+    }
+
+    /*─······································································─*/
+
+    string_t match( const string_t& _str, ulong off=0 ){
+        auto idx = search( _str, off ); /*-----*/
+        if( idx.null() /*-*/ ){ return nullptr; }
+        if( idx[0] == idx[1] ){ return nullptr; }
+        return _str.slice( idx[0], idx[1] );
+    }
+
+    /*─······································································─*/
+
+    bool test( const string_t& _str, ulong off=0 ){
+        auto idx = search( _str, off );
+        if( idx.null() /*-*/ ){ return 0; }
+        if( idx[0] == idx[1] ){ return 0; }
+        /*-------------------*/ return 1;
+    }
+
+};}
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#else
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
 namespace nodepp { class regex_t : public generator_t {
 protected:
 
@@ -34,48 +431,52 @@ protected:
                 obj->regex[_pos] == '{' ||
                 obj->regex[_pos] == '('
              ){ _pos = get_next_key( _pos ); continue; }
-            if( obj->regex[_pos] == '\\' ){ ++_pos; } ++_pos;
+            if( obj->regex[_pos] =='\\' ){ ++_pos; } ++_pos;
         }
 
     return out; }
 
-    int get_next_key( ulong _pos ){
-        uchar k=0; while( _pos < obj->regex.size() && k < 128 ){
+    ulong get_next_key( ulong _pos ){
+    uchar k=0; while( _pos < obj->regex.size() && k < 128 ){
 
-            switch( obj->regex[_pos] ){  case '\\': ++_pos; break;
-                case '[': k += 1; break; case ']' : k -= 1; break;
-                case '(': k += 2; break; case ')' : k -= 2; break;
-                case '{': k += 3; break; case '}' : k -= 3; break;
-            }
-
-            if( k == 0 ){ break; } ++_pos;
-        }   return _pos == obj->regex.size() ? -1 : _pos;
-    }
+        switch( obj->regex[_pos] ){  case '\\': ++_pos; break;
+            case '[': k += 1; break; case ']' : k -= 1; break;
+            case '(': k += 2; break; case ')' : k -= 2; break;
+            case '{': k += 3; break; case '}' : k -= 3; break;
+        }   if( k==0 ) /**/ { break; } 
+            
+    ++_pos; } return _pos; }
 
     ptr_t<int> get_rep( int pos, int npos ){
-        ptr_t<int> rep ({ 0, 0 }); bool b=0; string_t num[2];
+    ptr_t<int>     rep({ 0, 0 }); 
+    
+        bool b=0; string_t num[2];
 
         obj->regex.slice_view( pos+1, npos ).map([&]( char& data ){
             if  (!string::is_digit(data) ){ b =! b; }
             elif( string::is_digit(data) ){ num[b].push(data); }
         });
 
-        if( !num[0].empty() ) rep[0] = string::to_int( num[0] );
-        if( !num[1].empty() ) rep[1] = string::to_int( num[1] );
+        if( !num[0].empty() ){ rep[0] =string::to_int(num[0]);
+        /*------------------*/ rep[1] =string::to_int(num[0]); }
+        if( !num[1].empty() ){ rep[1] =string::to_int(num[1]); }
 
         return rep;
     }
 
     int get_next_repeat( int pos ){
-        if( obj->regex[pos] == '{' ){
-            auto npos = get_next_key( pos );
-                 obj->_rep = get_rep( pos, npos ); pos = npos + 1;
+
+        if( obj->regex[pos] == '{' ) {
+            auto npos = get_next_key ( pos );
+            obj->_rep = get_rep( pos, npos ); pos = npos + 1;
         }
-        elif( obj->regex[pos] == '?' ){ obj->_rep = ptr_t<int>({ 0, 1 }); ++pos; }
-        elif( obj->regex[pos] == '*' ){ obj->_rep = ptr_t<int>({ 0,-1 }); ++pos; }
-        elif( obj->regex[pos] == '+' ){ obj->_rep = ptr_t<int>({ 1,-1 }); ++pos; }
-        else                          { obj->_rep = ptr_t<int>({ 1, 0 });        } return pos;
-    }
+
+        elif( obj->regex[pos] == '?' ){ ++pos; obj->_rep = ptr_t<int>({ 0, 1 }); }
+        elif( obj->regex[pos] == '*' ){ ++pos; obj->_rep = ptr_t<int>({ 0,-1 }); }
+        elif( obj->regex[pos] == '+' ){ ++pos; obj->_rep = ptr_t<int>({ 1,-1 }); }
+        else /*--------------------*/ {        obj->_rep = ptr_t<int>({ 1, 0 }); } 
+        
+    return pos; }
 
     /*─······································································─*/
 
@@ -83,10 +484,9 @@ protected:
 
         goto CHCK; MORE: ++pos[1]; CHCK:
 
-            if( obj->_data[0]!=0x01     &&
-                obj->_data[0]!=0x03     &&
-                (ulong) pos[1]>=str.size()
-            ) { goto DONE; }
+            if( obj->_data[0]!=0x01    &&
+                obj->_data[0]!=0x03    &&
+            (ulong) pos[1]>=str.size() ){ goto DONE; }
 
             if( (uchar) obj->_data[0] == '(' ){
                 regex_t reg ( obj->_data.slice(1), obj->icase );
@@ -119,48 +519,45 @@ protected:
 
         LESS: ++pos[2];
 
-              if( obj->_rep[1] ==-1 ){ goto MORE; }
+            if  ( obj->_rep[1] ==-1 )/**/{ goto MORE; }
+
             elif( obj->_rep[1] == 0 ){
-                  if( pos[2] < obj->_rep[0] ){ goto MORE; }
-                else                         { goto DONE; }
-            } else {
-                  if( pos[2] < obj->_rep[0] ){ goto MORE; }
-                elif( pos[2] < obj->_rep[1] ){ goto MORE; }
-                else                         { goto DONE; }
-            }
+            if  ( pos[2] < obj->_rep[0] ){ goto MORE; }} 
+            
+            else{
+            if  ( pos[2] < obj->_rep[0] ){ goto MORE; }
+            elif( pos[2] < obj->_rep[1] ){ goto MORE; }}
 
         DONE:
 
             if( (ulong) pos[1] >= str.size() ){
-            if( (ulong) pos[0] <= obj->regex.last() &&
-                 !( obj->regex[pos[0]] == '$'   ||
-                    obj->regex[pos[0]] == '*'   ||
-                    obj->regex[pos[0]] == '+'   ||
-                    obj->regex[pos[0]] == '?'   ||
-                    obj->regex[pos[0]] == '|'   ||
-                    obj->regex[pos[0]] == '{'   ||
-                    obj->regex[pos[0]] == '}'   ||
-                    obj->regex[pos[0]] == '['   ||
-                    obj->regex[pos[0]] == ']'   ||
-                    obj->regex[pos[0]] == '('   ||
+
+                if( (ulong) pos[0] <= obj->regex.last() &&
+                ! ( obj->regex[pos[0]] == '$' || obj->regex[pos[0]] == '*' ||
+                    obj->regex[pos[0]] == '+' || obj->regex[pos[0]] == '?' ||
+                    obj->regex[pos[0]] == '|' || obj->regex[pos[0]] == '{' ||
+                    obj->regex[pos[0]] == '}' || obj->regex[pos[0]] == '[' ||
+                    obj->regex[pos[0]] == ']' || obj->regex[pos[0]] == '(' ||
                     obj->regex[pos[0]] == ')'
-                )){ goto FAIL; }
+                ) ) { goto FAIL; }
+
                 if( pos[2] >= obj->_rep[0] ){ goto CLSE; } goto FAIL;
+
             } elif( pos[2] == 0 && obj->_rep[0] == 0 ){
                 goto SKIP;
-            } elif( obj->_rep[1] ==-1 ){
+            } elif( obj->_rep[1] == -1 ){
                 if( pos[2] >=obj->_rep[0] ){ goto SKIP; } goto FAIL;
-            } elif( obj->_rep[1] != 0 ){
-                if( pos[2] > obj->_rep[1] ){ goto NEXT; }
-              elif( pos[2] >=obj->_rep[0] ){ goto NEXT; } goto FAIL;
-            } else {
+            } elif( obj->_rep[1] ==  0 ){
                 if( pos[2] >=obj->_rep[0] ){ goto NEXT; } goto FAIL;
+            } else { 
+                if( pos[2] < obj->_rep[0] ){ goto FAIL; }
+                if( pos[2] < obj->_rep[1] ){ goto SKIP; } goto NEXT;
             }
 
-        CLSE: pos[2] = 0; return -2;
         FAIL: pos[2] = 0; return -1;
         NEXT: pos[2] = 0; return  1;
         SKIP: pos[2] = 0; return  0;
+        CLSE: pos[2] = 0; return -2;
 
     }
 
@@ -231,7 +628,7 @@ protected:
 
             elif( obj->regex[pos[0]] == '(' || obj->regex[pos[0]] == '[' ){
                  auto npos = get_next_key( pos[0] );
-            if ( npos<0 ){ off.fill(0x00); break; }
+            if ( npos >= obj->regex.size() ){ off.fill(0x00); break; }
                  obj->_data = obj->regex.slice_view( pos[0], npos ); pos[0] = npos;
             }
 
@@ -258,13 +655,13 @@ protected:
                 obj->_data = string::to_string(obj->regex[pos[0]]);
             }   obj->_rep  = nullptr;
 
-        } while( (ulong)++pos[0]<=obj->regex.size() );
+        } while( (ulong)pos[0] ++< obj->regex.size() );
 
         obj->_data=nullptr; obj->_rep=nullptr;
 
     coFinish }
 
-    inline bool comparator( char a, char b ) const noexcept {
+    bool comparator( char a, char b ) const noexcept {
         return obj->icase ? ( string::to_lower(a)==string::to_lower(b) ) 
                           : ( a == b );
     }
@@ -305,22 +702,20 @@ public:
     /*─······································································─*/
 
     ptr_t<ulong> search( string_t _str, uint off=0 ){
-        ptr_t<ulong> out; while( off < _str.size() ){
-            if(( out=_search( _str, off ) ).null() )
-              { ++off; continue; } break;
-        }   return out;
-    }
+    ptr_t<ulong> out; while( off < _str.size() ){
+        if(( out=_search( _str, off ) ).null() )
+          { ++off; continue; } break;
+    }   return out; }
 
     /*─······································································─*/
 
     array_t<ptr_t<ulong>> search_all( const string_t& _str ){
-        queue_t<ptr_t<ulong>> out; ulong off=0; for(;;) {
-            auto idx = search( _str, off );
-            if( idx   ==nullptr ){ return out.data(); }
-            if( idx[0]==idx[1]  ){ return out.data(); } off=idx[1];
-                ptr_t<ulong> mem({ idx[0], idx[1] }); out.push(mem);
-        }   return nullptr;
-    }
+    queue_t<ptr_t<ulong>> out; ulong off=0; for(;;) {
+        auto idx = search( _str, off );
+        if( idx   ==nullptr ){ return out.data(); }
+        if( idx[0]==idx[1]  ){ return out.data(); } off=idx[1];
+            ptr_t<ulong> mem({ idx[0], idx[1] }); out.push(mem);
+    }   return nullptr; }
 
     /*─······································································─*/
 
@@ -385,7 +780,7 @@ public:
         auto idx = search( _str, off );
         if( idx == nullptr )  { return nullptr; }
         if( idx[0] == idx[1] ){ return nullptr; }
-            return _str.slice( idx[0], idx[1] );
+        return _str.slice( idx[0], idx[1] );
     }
 
     /*─······································································─*/
@@ -398,6 +793,10 @@ public:
     }
 
 };}
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -451,7 +850,7 @@ namespace nodepp { namespace regex {
 
     /*─······································································─*/
 
-    string_t match( const string_t& _str, const string_t& _reg, bool _flg=false ){
+    inline string_t match( const string_t& _str, const string_t& _reg, bool _flg=false ){
         regex_t reg( _reg, _flg ); return reg.match( _str );
     }
 
@@ -501,7 +900,7 @@ namespace nodepp { namespace regex {
         auto count = string::count( []( string_t ){ return true; }, args... );
 
         queue_t<string_t> out; ulong idx=0;
-        static ptr_t<regex_t> reg ({
+        thread_local static ptr_t<regex_t> reg ({
                regex_t( "\\$\\{\\d+\\}" ),
                regex_t( "\\d+" )
         });

@@ -217,10 +217,10 @@ namespace nodepp { namespace http {
     inline tcp_t server( function_t<void,http_t> cb, agent_t* opt=nullptr ){
     return tcp_t([=]( http_t cli ){
 
-        int c=0; while((c=cli.read_header())==1){ /*unused*/ }
-        if( c==0 ){ cb(cli); return; }
-        
-    cli.close(); }, opt ); }
+        int c =0; while((c=cli.read_header())==1){ /*unused*/ }
+        if( c!=0 ){ cli.close(); return; } cb(cli);
+    
+    }, opt ); }
 
     /*─······································································─*/
 

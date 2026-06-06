@@ -105,17 +105,12 @@ public:
                 self->onError.emit( "Error while accepting TLS" );
             return -1; }
             
-            auto cli   = ssocket_t( self->obj->ctx, c ); 
+            auto cli = ssocket_t( self->obj->ctx, c ); 
             cli.set_sockopt( self->obj->agent );
-            auto _read = type::bind( generator::file::read() );
 
         process::poll( cli, POLL_STATE::READ | POLL_STATE::EDGE, [=](){
 
-            if( (*_read)(&cli)==1  ){ return  0; }
-            if(!cli.is_available() ){ return -1; }
-                
-            cli.set_borrow(_read->data); self->onSocket.emit(cli);
-            /*------------------------*/ self->obj->func(cli);
+            self->onSocket.emit(cli); self->obj->func(cli);
             if( cli.is_available() ){ self->onConnect.emit(cli); }
 
             return -1; }, self->obj->agent.conn_timeout );
@@ -159,6 +154,8 @@ public:
                 self->onError.emit( "Error while connecting TLS" );
             return -1; }
 
+        process::poll( sk, POLL_STATE::READ | POLL_STATE::EDGE, [=](){
+
             cb(sk); self->onSocket.emit(sk);
             /*---*/ self->obj->func(sk);
 
@@ -168,6 +165,7 @@ public:
                 self->onConnect.emit(sk); 
             }
 
+        return -1; }, self->obj->agent.conn_timeout );
         return -1; });
 
     }

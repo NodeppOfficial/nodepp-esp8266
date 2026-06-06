@@ -16,8 +16,7 @@
 namespace nodepp { namespace wifi {
 
     inline wifi_t& get_wifi_device() { 
-    static wifi_t device; return device;
-    }
+    static wifi_t device; return device; }
 
     inline int turn_on () { return get_wifi_device().turn_on(); }
 

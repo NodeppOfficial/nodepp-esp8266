@@ -15,6 +15,7 @@
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #include "any.h"
+#include "event.h"
 #include "expected.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -41,139 +42,115 @@ namespace nodepp { struct PROMISE_STATE { enum TYPE {
 namespace nodepp { template< class T, class V > class promise_t {
 private:
 
-    using FINALLY  = event_t< >; /*-------------------*/
-    using RESOLVE  = event_t<T>; /*-------------------*/
-    using REJECT   = event_t<V>; /*-------------------*/
-    using NODE_CLB = function_t<void,res_t<T>,rej_t<V>>;
+    using FINALLY = event_t< >; /*-------------------*/
+    using RESOLVE = event_t<T>; /*-------------------*/
+    using REJECT  = event_t<V>; /*-------------------*/
+    using NODE_CLB= function_t<void,res_t<T>,rej_t<V>>;
 
 protected:
 
     struct NODE {
-        any_t /*-*/ value;
-        NODE_CLB node_clb;
-        REJECT    rej_clb;
-        RESOLVE   res_clb;
-        FINALLY   fin_clb;
-        uchar     state=0;
+        REJECT  rej_clb; /*----------*/
+        RESOLVE res_clb; any_t value  ;
+        FINALLY fin_clb; uchar state=0;
     };  ptr_t<NODE> obj;
-
-protected:
-
-    void invoke() const {
-
-        if( obj->state== PROMISE_STATE::UNDEFINED ){ return; }
-        if( obj->state&( PROMISE_STATE::FINISHED  |
-            /*--------*/ PROMISE_STATE::CLOSED    |
-            /*--------*/ PROMISE_STATE::PENDING  )){ return; }
-        if( obj->node_clb.null() )
-          { obj->state = PROMISE_STATE::CLOSED; /**/ return; }
-
-        obj->state|= PROMISE_STATE::PENDING;
-        auto self  = type::bind( this );
-
-        obj->node_clb([=]( T value ){
-            self->obj->state = PROMISE_STATE::FINISHED;
-            self->obj->state|= PROMISE_STATE::RESOLVED;
-            self->obj->state|= PROMISE_STATE::CLOSED  ;
-            self->obj->value = value; /*-------------*/
-            self->obj->res_clb.emit(value); /*-------*/
-            self->obj->fin_clb.emit(/*-*/); /*-------*/
-        self->free(); },[=]( V value ){
-            self->obj->state = PROMISE_STATE::FINISHED;
-            self->obj->state|= PROMISE_STATE::REJECTED;
-            self->obj->state|= PROMISE_STATE::CLOSED  ;
-            self->obj->value = value; /*-------------*/
-            self->obj->rej_clb.emit(value); /*-------*/
-            self->obj->fin_clb.emit(/*-*/); /*-------*/
-        self->free(); });
-
-    }
 
 public:
 
-   ~promise_t() noexcept { if( obj.count()>1 ){ return; } emit(); }
-
-    promise_t( const NODE_CLB& cb ) noexcept : obj( new NODE() ) {
-        obj->node_clb=cb; obj->state=PROMISE_STATE::OPEN;
-    }
+    promise_t( const NODE_CLB& cb ) noexcept: obj( new NODE() ) {
+        obj->state|= PROMISE_STATE::PENDING ;
+        auto self  = type::bind( this );
+    process::add([=](){ cb([=]( T value ){
+    if( self->obj->state & PROMISE_STATE::CLOSED ){ return; }
+        self->obj->state = PROMISE_STATE::FINISHED;
+        self->obj->state|= PROMISE_STATE::RESOLVED;
+        self->obj->state|= PROMISE_STATE::CLOSED  ;
+        self->obj->value = /**/ value ;
+        self->obj->res_clb.emit(value);
+        self->obj->fin_clb.emit(/*-*/);
+    },[=]( V value ){
+    if( self->obj->state & PROMISE_STATE::CLOSED ){ return; }
+        self->obj->state = PROMISE_STATE::FINISHED;
+        self->obj->state|= PROMISE_STATE::REJECTED;
+        self->obj->state|= PROMISE_STATE::CLOSED  ;
+        self->obj->value = /**/ value ;
+        self->obj->rej_clb.emit(value);
+        self->obj->fin_clb.emit(/*-*/);
+    }); return -1; }); }
 
     promise_t() noexcept : obj( new NODE() ) {}
 
+   ~promise_t() noexcept { if( obj.count()>1 ){ return; } emit(); }
+
     /*─······································································─*/
 
-    bool is_finished() const noexcept { return obj->state & PROMISE_STATE::FINISHED; }
-
-    bool is_resolved() const noexcept { return obj->state & PROMISE_STATE::RESOLVED; }
-
-    bool is_rejected() const noexcept { return obj->state & PROMISE_STATE::REJECTED; }
-
-    bool is_pending () const noexcept { return obj->state & PROMISE_STATE::PENDING ; }
-
-    bool is_closed  () const noexcept { return obj->state & PROMISE_STATE::CLOSED  ; }
-
-    bool has_value  () const noexcept { return obj->value.has_value(); }
-
-    uchar get_state () const noexcept { return obj->state; }
+    bool  is_finished() const noexcept { return obj->state & PROMISE_STATE::FINISHED; }
+    bool  is_resolved() const noexcept { return obj->state & PROMISE_STATE::RESOLVED; }
+    bool  is_rejected() const noexcept { return obj->state & PROMISE_STATE::REJECTED; }
+    bool  is_pending () const noexcept { return obj->state & PROMISE_STATE::PENDING ; }
+    bool  is_closed  () const noexcept { return obj->state & PROMISE_STATE::CLOSED  ; }
+    bool  has_value  () const noexcept { return obj->value.has_value(); }
+    uchar get_state  () const noexcept { return obj->state; }
 
     /*─······································································─*/
 
     expected_t<T,V> get_value() const {
 
-        if( obj->state & PROMISE_STATE::RESOLVED )
-          { return obj->value.template as<T>();  }
-        if( obj->state & PROMISE_STATE::REJECTED )
-          { return obj->value.template as<V>();  }
-        
-        if( obj->state & PROMISE_STATE::FINISHED )
-          { NODEPP_THROW_ERROR( "invalid value" ); }
-      elif( obj->state & PROMISE_STATE::CLOSED )
-          { NODEPP_THROW_ERROR( "promise is closed" ); }
-      elif( obj->state & PROMISE_STATE::PENDING )
-          { NODEPP_THROW_ERROR( "promise still pending" ); } 
-      else{ NODEPP_THROW_ERROR( "something went wrong"  ); }
+        if  ( obj->state & PROMISE_STATE::RESOLVED )
+            { return obj->value.template as<T>();  }
+        if  ( obj->state & PROMISE_STATE::REJECTED )
+            { return obj->value.template as<V>();  }
+            
+        if  ( obj->state & PROMISE_STATE::FINISHED )
+            { NODEPP_THROW_ERROR( "invalid value" ); }
+        elif( obj->state & PROMISE_STATE::CLOSED )
+            { NODEPP_THROW_ERROR( "promise is closed" ); }
+        elif( obj->state & PROMISE_STATE::PENDING )
+            { NODEPP_THROW_ERROR( "promise still pending" ); } 
+        else{ NODEPP_THROW_ERROR( "something went wrong"  ); }
 
     }
 
+    void   off() const noexcept { obj->state |= PROMISE_STATE::CLOSED; }
     void close() const noexcept { off(); }
-    void  free() const noexcept { off(); }
-    void   off() const noexcept {
-        obj->state |= PROMISE_STATE::CLOSED;
-        obj->rej_clb .clear();
-        obj->res_clb .clear();
-        obj->fin_clb .clear();
-    //  obj->node_clb.clear();
-    }
+
+    /*─······································································─*/
+
+    int emit() const noexcept { do {
+
+        if( obj->state==PROMISE_STATE::UNDEFINED ){ break; }
+        if( !has_value() ) /*------------------*/ { break; }
+ 
+        if( is_resolved() ){
+            obj->res_clb.emit( obj->value.template as<T>() );
+            obj->fin_clb.emit();
+        return 1; }
+
+        if( is_rejected() ){
+            obj->rej_clb.emit( obj->value.template as<V>() );
+            obj->fin_clb.emit();
+        return 1; }
+
+    } while(0); return -1; }
 
     /*─······································································─*/
 
     expected_t<T,V> await() const { do {
 
-        if( obj->state== PROMISE_STATE::UNDEFINED ){ break; }
-        if( obj->state&( PROMISE_STATE::FINISHED  |
-            /*--------*/ PROMISE_STATE::CLOSED    |
-            /*--------*/ PROMISE_STATE::PENDING  )){ break; }
-            
-    invoke(); } while(0); 
+        if   ( obj->state==PROMISE_STATE::UNDEFINED ){ break; }
+        while( is_pending() ){ process::next(); } 
 
-        auto self = type::bind(this); process::await([=](){
-            while( self->is_pending() ){ return  1; } 
-            /*------------------------*/ return -1;
-        }); return get_value(); 
-    
-    }
+    return get_value(); } while(0); return nullptr; }
 
     /*─······································································─*/
 
-    void emit() const noexcept { do {
+    template< class U, class P, class Q >
+    promise_t& join( const U cb_then, const P cb_fail, const Q cb_final ) noexcept {
+    return then( cb_then ).fail( cb_fail ).finally( cb_final ); }
 
-        if( obj->state== PROMISE_STATE::UNDEFINED ){ break ; }
-        if( obj->state&( PROMISE_STATE::FINISHED  |
-            /*--------*/ PROMISE_STATE::CLOSED    |
-            /*--------*/ PROMISE_STATE::PENDING  )){ return; }
-
-        invoke(); return; 
-
-    } while(0); free(); }
+    template< class U, class P >
+    promise_t& join( const U cb_then, const P cb_fail ) noexcept {
+    return then( cb_then ).fail( cb_fail ); }
 
     /*─······································································─*/
 

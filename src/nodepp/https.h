@@ -118,10 +118,10 @@ namespace nodepp { namespace https {
     inline tls_t server( function_t<void,https_t> cb, ssl_t* ssl=nullptr, agent_t* opt=nullptr ){
     return tls_t([=]( https_t cli ){
 
-        int c=0; while((c=cli.read_header())==1){ /*unused*/ }
-        if( c==0 ){ cb(cli); return; }
-        
-    cli.close(); }, ssl, opt ); }
+        int c =0; while((c=cli.read_header())==1){ /*unused*/ }
+        if( c!=0 ){ cli.close(); return; } cb(cli);
+    
+    }, ssl, opt ); }
     
     /*─······································································─*/
     

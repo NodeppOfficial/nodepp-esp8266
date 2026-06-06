@@ -24,7 +24,7 @@ namespace nodepp { using query_t = map_t< string_t, string_t >;
 namespace query  {
 
     inline query_t parse( string_t data ){
-    /*--*/ regex_t reg( MEMSTR("[?&]([^= ]+)=([^?&]+)") );
+    /*--*/ regex_t reg( "[?&]([^= ]+)=([^?&]+)" );
 
         if( data.empty() || data[0]!='?' )
           { return nullptr; } query_t out;

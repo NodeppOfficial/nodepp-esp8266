@@ -23,7 +23,7 @@ namespace nodepp { using cookie_t = map_t< string_t, string_t >;
 namespace cookie {
 
     inline query_t parse( string_t data ){
-    /*--*/ regex_t reg( MEMSTR("([^= ;]+)=([^;]+)") );
+    /*--*/ regex_t reg( "([^= ;]+)=([^;]+)" );
 
         if( data.empty() /*-----------*/ )
           { return nullptr; } query_t out;

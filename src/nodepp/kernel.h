@@ -15,6 +15,7 @@
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #if   _KERNEL_ == NODEPP_KERNEL_ARDUINO
+    #include "invoke.h"
     #include "arduino/kernel.h"
 #else
     #error "This OS Does not support kernel.h"
