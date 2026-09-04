@@ -9,49 +9,53 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_POSIX_KERNEL
-#define NODEPP_POSIX_KERNEL
-#define NODEPP_POLL_NPOLL
+#ifndef NODEPP_EVENT_SCHEDULER
+#define NODEPP_EVENT_SCHEDULER NODEPP_SCHEDULER_LITE
 #endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifdef NODEPP_POLL_NPOLL
+#if NODEPP_EVENT_SCHEDULER == NODEPP_SCHEDULER_LITE
 
 namespace nodepp { class kernel_t {
 private:
 
-    enum FLAG { 
-         KV_STATE_UNKNONW = 0b00000000, 
+    enum FLAG : uchar { 
+         KV_STATE_UNKNOWN = 0b00000000, 
+         KV_STATE_OPEN    = 0b10000000,
          KV_STATE_WRITE   = 0b00000001,
          KV_STATE_READ    = 0b00000010,
          KV_STATE_EDGE    = 0b10000000,
-         KV_STATE_USED    = 0b00000100,
-         KV_STATE_AWAIT   = 0b00001100,
-         KV_STATE_CLOSED  = 0b00001000
+         KV_STATE_USED    = 0b00100000,
+         KV_STATE_SLEEP   = 0b01000000,
+         KV_STATE_CLOSED  = 0b00001000,
+         KV_STATE_FALLBACK= 0b00000001
     };
 
-    struct kevent_t { public:
-        function_t<int> callback;
-        ulong timeout; int fd, flag; 
-    };
+protected:
 
-    bool is_std( int fd ) const noexcept { 
-        return fd==0 || fd==1 || fd==2 ;
-    }
+    void clear_timeout() const noexcept { get_timeout(true); }
 
-    /*─······································································─*/
+    uchar_32 set_timeout( uchar_32 time=0 ) const noexcept { 
+        auto stamp=&get_timeout(); auto out=*stamp;
+        if( *stamp > time ){ *stamp=time; }
+    return out; }
 
-    int get_delay_ms() const noexcept {
-        ulong tasks= obj->ev_queue.size() + obj->probe.get();
-        ulong time = TIMEOUT==0 || tasks==0 ? 1 : TIMEOUT;
-    return ( tasks==0 ) ? 10 : time; }
+    uchar_32& get_timeout( bool reset=false ) const noexcept {
+        if( reset ){ obj->timeout = (uchar_32)-1; }
+    return obj->timeout; }
+
+    uchar_32 get_delay_ms() const noexcept {
+        ulong tasks= obj->ev_queue.size();
+        if(tasks==0 && obj.count()>1 ){ return 1000; }
+    return get_timeout(); }
 
 protected:
 
     struct NODE {
-        probe_t   probe;
-        loop_t ev_queue;
+        uchar    state   ;
+        uchar_32 timeout ;
+        loop_t   ev_queue;
     };  ptr_t<NODE> obj;
 
 public:
@@ -60,7 +64,7 @@ public:
 
 public:
 
-    void off( ptr_t<task_t> address ) const noexcept { clear( address ); }
+    void off  ( ptr_t<task_t> address ) const noexcept { clear( address ); }
 
     void clear( ptr_t<task_t> address ) const noexcept {
          if( address.null() ) /*--------------*/ { return; }
@@ -69,34 +73,38 @@ public:
     }
 
     /*─······································································─*/
+    
+    bool should_close() const noexcept { return empty() || NODEPP_SHTDWN() || NODEPP_LOCAL_SHTDWN(); }
 
-    ulong size() const noexcept { return obj->ev_queue.size() + obj->probe.get() + obj.count()-1; }
+    ulong size() const noexcept { return obj->ev_queue.size() + obj.count()-1; }
 
-    void clear() const noexcept { /*--*/ obj->ev_queue.clear(); obj->probe.clear(); }
+    void clear() const noexcept { /*--*/ obj->ev_queue.clear(); }
 
     bool empty() const noexcept { return size()==0; }
 
-    int   emit() const noexcept { return -1; }
-
     /*─······································································─*/
 
-    ptr_t<bool>& should_close(){ static ptr_t<bool> state ( 0UL, false ); return state; }
+    bool is_sleeping() const noexcept { return obj->state & FLAG::KV_STATE_SLEEP; }
+
+    ulong  get_delay() const noexcept { return get_delay_ms(); }
+
+    int /*---*/ wake() const noexcept { return -1; }
 
     /*─······································································─*/
 
     template< class T, class U, class... W >
-    ptr_t<task_t> poll_add ( T str, int /*unused*/, U cb, ulong timeout=0, const W&... args ) noexcept {
+    ptr_t<task_t> poll_add( T& inp, uchar flag, U cb, ulong timeout=0, const W&... args ) const noexcept {
 
-        auto time = type::bind( timeout>0 ? timeout + process::now() : timeout );
-        auto clb  = type::bind( cb ); 
-        
-        return obj->ev_queue.add( coroutine::add( COROUTINE(){
+        function_t<int,W...> clb ( cb ); if ( inp.is_closed() ) { return nullptr; }
+        auto time = timeout>0 ? timeout + process::now() : timeout;
+
+        return loop_add( coroutine::add( COROUTINE(){
         coBegin 
 
-            if( *time > 0 && *time < process::now() ){ coEnd; }
-            if( is_std( str.get_fd() ) ) /**/ { coDelay(100); }
-
-            coSet(0); return (*clb)( args... ) >= 0 ? 1 : -1; 
+            while( clb( args... )>=0 ){
+            if( time > 0 && time < process::now() ){ break; }
+            if( inp.is_waiting() ) /*-------*/ { coGoto(0); } 
+            coNext; }
 
         coFinish
         }));
@@ -104,35 +112,41 @@ public:
     }
 
     template< class T, class... V >
-    ptr_t<task_t> loop_add ( T cb, const V&... args ) noexcept {
+    ptr_t<task_t> loop_add ( T cb, const V&... args ) const noexcept {
         return obj->ev_queue.add( cb, args... );
     }
 
     /*─······································································─*/
 
-    inline int next() const {
+    int next() const {
 
-        while( obj->ev_queue.next() >= 0 ){ return 1; } 
-        process::set_timeout(obj->ev_queue.get_delay());
+        if( obj->ev_queue.next()==1 ){ return 1; } 
+
+        obj->state |=  FLAG::KV_STATE_SLEEP;
+
+        set_timeout(obj->ev_queue.get_delay());
         process::delay( get_delay_ms() );
-        process::clear_timeout();
+        clear_timeout();
+        
+        obj->state &=~ FLAG::KV_STATE_SLEEP;
 
     return 1; }
 
     /*─······································································─*/
 
     template< class T, class... V > 
-    int await( T cb, const V&... args ) const { 
-    int c=0; probe_t tmp = obj->probe;
+    int await( T cb, const V&... args ) const { int c=0;
 
         if ((c =cb(args...))>=0 ){
         if ( c==1 ){ auto t = coroutine::getno().delay;
-        if ( t >0 ){ process::set_timeout( t ); }
-        else /*-*/ { process::set_timeout(0UL); }} next(); return 1; } 
+        if ( t >0 ){ set_timeout( t ); }
+        else /*-*/ { set_timeout(0UL); }} next(); return 1; } 
     
     return -1; }
 
 };}
+
+/*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
 

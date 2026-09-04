@@ -9,11 +9,14 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_KERNEL
-#define NODEPP_KERNEL
-
-#include "./arduino/kernel.h"
-
-#endif
+#ifndef NODEPP__KERNEL
+#define NODEPP__KERNEL
 
 /*────────────────────────────────────────────────────────────────────────────*/
+
+#include "invoker.h"
+#include "arduino/kernel.h"
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#endif

@@ -78,26 +78,24 @@ protected:
 
 public:
 
+    object_t( null_t ) : obj( new NODE() ){}
+    object_t()         : obj( new NODE() ){}
+
     template< ulong N >
     object_t( const T (&arr) [N] ) : obj( new NODE() ) {
-        QUEUE mem; for( ulong x=0; x<N; ++x )
-            { mem[arr[x].first]= arr[x].second; }
-        obj->mem = mem; obj->type = 20;
+        QUEUE  mem; for( ulong x=0; x<N; ++x ) { 
+               mem[arr[x].first]= arr[x].second; 
+        } obj->mem = mem; obj->type = 20;
     }
-
-    object_t( null_t ) : obj( new NODE() ) { /*---*/ }
 
     template< class U >
-    object_t( const U& any ) : obj( new NODE() ) {
-        if( type::is_same<U,ARRAY>::value )
-          { obj->type = 21; goto BACK; }
-      elif( type::is_same<U,QUEUE>::value )
-          { obj->type = 20; goto BACK; }
+    object_t( const U& value ) : obj( new NODE() ) { do {
+        if  ( type::is_same<U,ARRAY>::value )
+            { obj->type = 21; break; }
+        elif( type::is_same<U,QUEUE>::value )
+            { obj->type = 20; break; }
         obj->type = type::obj_type_id<U>::value;
-        BACK:; obj->mem = any;
-    }
-
-    object_t() : obj( new NODE() ){}
+    } while(0); obj->mem = value; }
 
     /*─······································································─*/
 
@@ -107,14 +105,15 @@ public:
         elif( get_type_id()     == type::obj_type_id<U>  ::value ){ return true; } 
     return false; }
 
+    template< class U > U as() const { return obj->mem.as<U>(); }
+
     template< class U >
     explicit operator    U() const { return obj->mem.as<U>(); }
     explicit operator bool() const { return has_value(); /**/ }
 
-    bool has_value()         const { return obj->type<0?false:obj->mem.has_value(); }
-    uint type_size()         const { return obj->type<0?false:obj->mem.type_size(); }
+    bool has_value() const { return obj->type<0?false:obj->mem.has_value(); }
+    uint type_size() const { return obj->type<0?false:obj->mem.type_size(); }
 
-    template< class U > U as() const { return obj->mem.as<U>(); }
 
     /*─······································································─*/
 
@@ -126,8 +125,8 @@ public:
     }
 
     object_t& operator[]( const ulong& idx ) const {
-        if( !has_value() ){ ARDUINO_ERROR("item is empty"); }
-        if( !is<ARRAY>() ){ ARDUINO_ERROR("item isn't an array"); }
+        if( !has_value() ){ NODEPP_THROW_ERROR("item is empty"); }
+        if( !is<ARRAY>() ){ NODEPP_THROW_ERROR("item isn't an array"); }
         return obj->mem.as<ARRAY>()[idx];
     }
 
@@ -189,3 +188,5 @@ public:
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

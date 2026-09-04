@@ -39,6 +39,13 @@ namespace nodepp { namespace conio {
         perr( data ); return data.size();
     }
 
+    /*─······································································─*/
+
+    inline int error( string_t msg ){ return log( msg ); }
+    inline int  info( string_t msg ){ return log( msg ); }
+    inline int  done( string_t msg ){ return log( msg ); }
+    inline int  warn( string_t msg ){ return log( msg ); }
+
 }}
 
 /*────────────────────────────────────────────────────────────────────────────*/

@@ -9,57 +9,58 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_EVENT_LOOP
-#define NODEPP_EVENT_LOOP
+#ifndef NODEPP_INVOKE_DMA
+#define NODEPP_INVOKE_DMA
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { namespace process {
+#include "handler.h"
 
-    kernel_t& NODEPP_EV_LOOP(){ static kernel_t evloop; return evloop; }
-    
-    /*─······································································─*/
+/*────────────────────────────────────────────────────────────────────────────*/
 
-    template< class... T >
-    void await( const T&... args ){ while(NODEPP_EV_LOOP().await( args... )==1){/*unused*/} }
+namespace nodepp { template< class... T > class invoker_t {
+protected:
 
-    template< class... T >
-    ptr_t<task_t> foop( const T&... args ){ return NODEPP_EV_LOOP().loop_add( args... ); }
+    using NODE_CLB = function_t<int,T...>;
+    /*-*/ handler_t<NODE_CLB> que;
 
-    template< class... T >
-    ptr_t<task_t> loop( const T&... args ){ return NODEPP_EV_LOOP().loop_add( args... ); }
+public: invoker_t() {}
 
-    template< class... T >
-    ptr_t<task_t> poll( const T&... args ){ return NODEPP_EV_LOOP().poll_add( args... ); }
-
-    template< class... T >
-    ptr_t<task_t> add ( const T&... args ){ return NODEPP_EV_LOOP().loop_add( args... ); }
-    
-    /*─······································································─*/
-
-    inline void clear( ptr_t<task_t> address ){ NODEPP_EV_LOOP().off( address ); }
-    inline void   off( ptr_t<task_t> address ){ NODEPP_EV_LOOP().off( address ); }
-    inline int   emit() /*-----------------*/ { return NODEPP_EV_LOOP().emit (); }
+    bool  empty() const noexcept { return que.empty(); }
+    ulong size () const noexcept { return que.size (); }
+    void  clear() const noexcept { /*--*/ que.clear(); }
+    void  free () const noexcept { /*--*/ que.clear(); }
 
     /*─······································································─*/
 
-    inline bool should_close(){ return NODEPP_EV_LOOP().empty() || *NODEPP_EV_LOOP().should_close(); }
-    inline bool        empty(){ return NODEPP_EV_LOOP().empty(); }
-    inline ulong        size(){ return NODEPP_EV_LOOP().size (); }
-    inline void        clear(){ /*--*/ NODEPP_EV_LOOP().clear(); }
+    bool is_valid( uchar_64 address ) const noexcept { return que.is_valid( address ); }
+    int  off     ( uchar_64 address ) const noexcept { return que.remove  ( address ); }
 
     /*─······································································─*/
 
-    inline int next(){ return NODEPP_EV_LOOP().next(); }
+    int emit( uchar_64 address, const T&... arg ) const noexcept {
+        auto mem = que.read( address );
+        if( mem.null() ){ return -1; }
+        int c = mem->emit( arg... );
+        if( c==-1 )/*-*/{ off( address ); }
+    return c; }
 
-    inline void exit( int err=0 ){ 
-        if( should_close() ) /*--------*/ { goto DONE; }
-        *NODEPP_EV_LOOP().should_close() = true; clear(); 
-    DONE:; 
-        ::exit(err); 
-    }
+    /*─······································································─*/
 
-}}
+    uchar_64 add( NODE_CLB clb ) const noexcept {
+        auto tsk = ptr_t<int>( 0UL, 0x00 );
+        auto mid = que.create();
+
+        que.update( mid, [=]( const T&... args ){
+        if( *tsk & TASK_STATE::USED ){ return -2; }
+            *tsk|= TASK_STATE::USED; int c = clb( args... );
+        if( tsk.null() ) /*-------*/ { return -1; }
+            *tsk&=~TASK_STATE::USED;
+        return c; });
+        
+    return mid; }
+
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
