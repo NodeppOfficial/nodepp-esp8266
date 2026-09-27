@@ -14,28 +14,15 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <unistd.h>
-#include <cerrno>
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
 namespace nodepp { namespace os {
     
-    inline void exit( int err=0 ){ ::exit(err); }
-
-    /*─······································································─*/
-
-    inline uint pid(){ return ::getpid(); }
-    
-    /*─······································································─*/
-
     inline string_t tmp(){ return "/"; }
 
     inline string_t cwd(){ return "/"; }
 
-    /*─······································································─*/
+    inline uint    cpus(){ return   1; }
 
-    inline uint error(){ return errno; }
+    inline void   reset(){ ARDUINO_RESET(); }
 
 }}
 

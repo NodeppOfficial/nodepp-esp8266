@@ -14,12 +14,26 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#ifndef NODEPP_LOOP_ENGINE
+#if ( NODEPP_KERNEL==NODEPP_KERNEL_ARDUINO )
+    #define NODEPP_LOOP_ENGINE NODEPP_LOOP_LITE
+#else
+    #define NODEPP_LOOP_ENGINE NODEPP_LOOP_FULL
+#endif
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#if ( NODEPP_LOOP_ENGINE == NODEPP_LOOP_FULL )
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
 namespace nodepp { class loop_t {
 private:
 
     using NODE_CLB = function_t<int>;
-    using NODE_TASK= type::pair<ulong,void*>;
-    using NODE_PAIR= type::pair<NODE_CLB,ptr_t<task_t>>;
+    using NODE_TASK= pair_t<uchar_64,void*>;
+    using NODE_PAIR= pair_t<NODE_CLB,ptr_t<task_t>>;
 
 protected:
 
@@ -31,11 +45,12 @@ protected:
 
     /*─······································································─*/
 
-    void* get_nearest_timeout( ulong time ) const noexcept {
+    void* get_nearest_timeout( uchar_64 time ) const noexcept {
     
         auto x = obj->blocked.last(); while( x!=nullptr ){
-        if( time>=x->data.first ){ return x->next; }
-        x = x->prev; }
+        if ( time>=x->data.first ){ return x->next; }
+             x = x->prev; 
+        }
 
     return obj->blocked.first(); }
 
@@ -49,8 +64,8 @@ protected:
         if( x->data.first > stamp ){ return -1; }
 
         if( x->data.first < stamp ){
-            obj->normal .push ( x->data.second ); 
-            obj->blocked.erase( x );
+            obj->normal .unshift( x->data.second ); 
+            obj->blocked.erase  ( x );
         } else { break; }} while(1); return 1;
 
     }
@@ -58,15 +73,16 @@ protected:
     /*─······································································─*/
 
     inline int normal_queue_next() const {
-    
+
         if( obj->normal.empty() ) /*-*/ { return -1; } do {
         if( obj->normal.get()==nullptr ){ return -1; }
 
-        auto x = obj->normal.get(); auto y = obj->queue.as(x->data);
-        auto o = obj->normal.get() == obj->normal.last() ? -1 : 1;
+        auto x = obj->normal.get(); 
+        auto y = obj->queue .as (x->data);
+        auto o = obj->normal.get()->prev ? 1 : -1;
         
         if( y->data.second->flag & TASK_STATE::USED   ){ 
-            obj->normal.next(); 
+            obj->normal.prev(); 
         return 0; }
         
         if( y->data.second->flag & TASK_STATE::CLOSED ){ 
@@ -76,9 +92,10 @@ protected:
 
         y->data.second->flag |= TASK_STATE::USED;
 
-        int c=0; ulong d=0; while( ([&](){
+        uchar_32 d=0; while( ([&](){
             
-            do{ c=y->data.first(); auto z=coroutine::getno();
+            do{ int c=y->data.first (); auto z = coroutine::getno();
+            if( obj->normal.empty() ){ return -1; }
             if( c==1 && z.flag&coroutine::STATE::CO_STATE_DELAY )
               { d=z.delay; goto GOT3; } switch(c) {
                 case  1 :  goto GOT1;   break;
@@ -89,23 +106,23 @@ protected:
             GOT1:;
 
                 y->data.second->flag &=~ TASK_STATE::USED; 
-                obj->normal.next(); return -1;
+                obj->normal.prev(); return -1;
 
             GOT2:;
 
                 y->data.second->flag = TASK_STATE::CLOSED;
                 /*---------------*/ return -1;
 
-            GOT3:;
-
-            do {
+            GOT3:; do {
 
                 y->data.second->flag &=~ TASK_STATE::USED;  
-                ulong wake_time = d + process::now();
 
+                uchar_64 max__time = (uchar_32) -1;
+                uchar_64 wake_time = min( d+process::now(), max__time );
                 auto z = obj->blocked.as( get_nearest_timeout( wake_time ) );
+                
                 obj->blocked.insert( z, NODE_TASK( { wake_time, y } ));
-                obj->normal .erase(x); 
+                obj->normal .erase ( x ); 
 
             return -1; } while(0);
 
@@ -120,31 +137,34 @@ public: loop_t() noexcept : obj( new NODE() ) {}
 
     /*─······································································─*/
 
-    void off( ptr_t<task_t> address ) const noexcept { clear( address ); }
-
+    void off  ( ptr_t<task_t> address ) const noexcept { clear( address ); }
     void clear( ptr_t<task_t> address ) const noexcept {
-        if( address.null() ) /*-*/ { return; }
-        if( address->sign != &obj ){ return; }
+        if( address.null() ) /*--------------*/ { return; }
         if( address->flag & TASK_STATE::CLOSED ){ return; }
-            address->flag = TASK_STATE::CLOSED;
+        if( address->sign != &obj ) /*-------*/ { return; }
+            address->flag = TASK_STATE::CLOSED ;
     }
 
     /*─······································································─*/
 
-    int get_delay() const noexcept { 
-        if(!obj->normal .empty() ){ return  0; }
-        if( obj->blocked.empty() ){ return -1; }
+    uchar_32 get_delay() const noexcept { 
 
-        auto stm = obj->blocked.first()->data.first;
+        if(!obj->normal .empty() ){ return 0; }
+        if( obj->blocked.empty() ){ return 0; }
+
+        auto lmt = type::cast<uchar_64>((uchar_32)-1);
+        auto raw = obj->blocked.first()->data.first;
         auto now = process::now();
+        auto out = raw - now;
 
-        return ( stm>now ) ? ( stm-now ) : 0;
+        return raw>now ? out>lmt ? lmt : out : 0;
+        
     }
 
     /*─······································································─*/
 
     ulong size() const noexcept { return obj->queue.size  (); }
-
+    
     bool empty() const noexcept { return obj->queue.empty (); }
 
     /*─······································································─*/
@@ -164,13 +184,15 @@ public: loop_t() noexcept : obj( new NODE() ) {}
 
     template< class T, class... V >
     ptr_t<task_t> add( T cb, const V&... args ) const noexcept {
-    ptr_t<task_t> tsk( 0UL, task_t() ); auto clb = type::bind( cb );
+    ptr_t<task_t> tsk( 0UL, task_t() ); 
 
-        obj->queue .push({[=](){ return (*clb)(args...); }, tsk });
-        obj->normal.push( obj->queue.last() ); 
+        function_t<int,V...> clb ( cb );
 
-        tsk->addr = obj->queue.last();
-        tsk->flag = TASK_STATE::OPEN ;
+        obj->queue .push   ({[=](){ return clb(args...); }, tsk });
+        obj->normal.unshift( obj->queue.last() ); 
+
+        tsk->addr = obj->queue.first();
+        tsk->flag = TASK_STATE::OPEN  ;
         tsk->sign = &obj;
 
     return tsk; }
@@ -179,6 +201,113 @@ public: loop_t() noexcept : obj( new NODE() ) {}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#else
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { class loop_t {
+private:
+
+    using NODE_CLB = function_t<int>;
+    using NODE_PAIR= pair_t<NODE_CLB,ptr_t<task_t>>;
+
+protected:
+
+    struct NODE {
+        queue_t<NODE_PAIR> queue ;
+    };  ptr_t<NODE> obj;
+
+public: loop_t() noexcept : obj( new NODE() ) {}
+
+    /*─······································································─*/
+
+    void off  ( ptr_t<task_t> address ) const noexcept { clear( address ); }
+    void clear( ptr_t<task_t> address ) const noexcept {
+        if( address.null() ) /*--------------*/ { return; }
+        if( address->flag & TASK_STATE::CLOSED ){ return; }
+        if( address->sign!= &obj ) /*--------*/ { return; }
+            address->flag = TASK_STATE::CLOSED;
+    }
+
+    /*─······································································─*/
+
+    uchar_32 get_delay() const noexcept { return 0; }
+
+    /*─······································································─*/
+
+    void clear() const noexcept { obj->queue.clear(); }
+
+    ulong size() const noexcept { return obj->queue.size  (); }
+
+    bool empty() const noexcept { return obj->queue.empty (); }
+
+    /*─······································································─*/
+
+    int next() const {
+
+        if( obj->queue.empty() ) /*-*/ { return -1; } do {
+        if( obj->queue.get()==nullptr ){ return -1; }
+
+        auto x = obj->queue.get();
+        auto o = obj->queue.get()->prev ? 1 : -1;
+        
+        if( x->data.second->flag & TASK_STATE::USED   ){ 
+            obj->queue.prev(); 
+        return 0; }
+        
+        if( x->data.second->flag & TASK_STATE::CLOSED ){ 
+            obj->queue.erase(x); 
+        return 1; } 
+
+        x->data.second->flag |= TASK_STATE::USED;
+
+        while( ([&](){
+            
+            do{ int c=x->data.first();
+            if( obj->queue.empty() ){ return -1; } switch(c) {
+                case  1 : goto GOT1; break;
+                case -1 : goto GOT2; break;
+                case  0 : goto GOT3; break;
+            } } while(0);
+
+            GOT1:;
+
+                x->data.second->flag &=~ TASK_STATE::USED; 
+                obj->queue.prev(); return -1;
+
+            GOT2:;
+
+                x->data.second->flag = TASK_STATE::CLOSED;
+                /*---------------*/ return -1;
+
+            GOT3:;
+
+        return -1; })() >= 0 ){ /* unused */ }
+        return  o; } while(0); return -1;
+
+    }
+
+    /*─······································································─*/
+
+    template< class T, class... V >
+    ptr_t<task_t> add( T cb, const V&... args ) const noexcept {
+    ptr_t<task_t> tsk( 0UL, task_t() ); 
+
+        function_t<int,V...> clb ( cb );
+
+        obj->queue.unshift({[=](){ return clb(args...); }, tsk });
+
+        tsk->addr = obj->queue.first();
+        tsk->flag = TASK_STATE::OPEN  ;
+        tsk->sign = &obj;
+
+    return tsk; }
+
+};}
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#endif
 #endif
 
 /*────────────────────────────────────────────────────────────────────────────*/

@@ -9,64 +9,76 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_POSIX_MUTEX
-#define NODEPP_POSIX_MUTEX
+#ifndef NODEPP_LISTENER
+#define NODEPP_LISTENER
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <pthread.h>
+#include "map.h"
+#include "event.h"
+#include "optional.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { class mutex_t {
+namespace nodepp { template< class T, class... A > class listener_t {
 protected:
 
-    struct NODE {
-       ~NODE(){ pthread_mutex_destroy(&fd); }
-        pthread_mutex_t fd;
-    };  atomic_ptr_t<NODE> obj;
+    struct NODE { map_t<T,event_t<A...>> que; }; ptr_t<NODE> obj;
 
 public:
 
-    mutex_t() : obj( new NODE() ) {
-        if( pthread_mutex_init(&obj->fd,NULL)!=0 )
-          { NODEPP_THROW_ERROR("Cant Start Mutex");  }
-    }
-    
-    /*─······································································─*/
-
-    template< class T, class... V >
-    int operator() ( T callback, const V&... args ) const noexcept { 
-        return emit( callback, args... ); 
-    }
-    
-    /*─······································································─*/
-
-    template< class T, class... V >
-    int emit( T callback, const V&... args ) const noexcept {
-        lock  (); int c=callback( args... ); 
-        unlock(); /*------------*/ return c;
-    }
-
-    template< class T, class... V >
-    void lock( T callback, const V&... args ) const noexcept {
-         lock(); callback( args... ); unlock(); 
-    }
-    
-    /*─······································································─*/
-
-    void unlock() const noexcept { while( !_unlock() ){ /*unused*/ } }
-    void lock  () const noexcept { while( !_lock  () ){ /*unused*/ } }
+    listener_t() noexcept : obj( new NODE() ) {}
 
     /*─······································································─*/
 
-    bool _unlock() const noexcept { return pthread_mutex_unlock(&obj->fd)==0; }
-    bool _lock  () const noexcept { return pthread_mutex_lock  (&obj->fd)==0; }
+    template< class V >
+    ptr_t<task_t> operator()( T val, V cb ) const noexcept { return on(val,cb); }
+
+    /*─······································································─*/
+
+    ptr_t<task_t> once( const T& val, function_t<void,A...> cb ) const noexcept {
+        return obj->que[val].once( cb );
+    }
+
+    ptr_t<task_t> add( const T& val, function_t<int,A...> cb ) const noexcept {
+        return obj->que[val].add( cb );
+    }
+
+    ptr_t<task_t> on( const T& val, function_t<void,A...> cb ) const noexcept {
+        return obj->que[val].on( cb );
+    }
+
+    /*─······································································─*/
+
+    bool   has( const T& val ) const noexcept { return obj->que.has( val ); }
+
+    void clear( const T& val ) const noexcept { obj->que.erase( val ); }
+
+    /*─······································································─*/
+
+    ptr_t<T> keys() const noexcept { return obj->que.keys (); }
+    bool    empty() const noexcept { return obj->que.empty(); }
+    ulong    size() const noexcept { return obj->que.size (); }
+    void    clear() const noexcept { /*--*/ obj->que.clear(); }
+    void     free() const noexcept { /*--*/ obj->que.free (); }
+
+    /*─······································································─*/
+
+    optional_t<event_t<A...>> get( const T& val ) const noexcept {
+        if( !has( val ) ){ return nullptr; }
+        return obj->que[val];
+    }
+
+    void off( const T& val, ptr_t<task_t> address ) const noexcept {
+         if( !has( val ) ){ return; } obj->que[val].off( address );
+    }
+
+    void emit( const T& val, const A&... args ) const noexcept {
+         if( !has( val ) ){ return; } obj->que[val].emit( args... );
+    }
 
 };}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
-
-/*────────────────────────────────────────────────────────────────────────────*/

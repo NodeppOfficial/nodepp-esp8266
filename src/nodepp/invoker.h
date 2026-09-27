@@ -9,59 +9,66 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_POSIX_MUTEX
-#define NODEPP_POSIX_MUTEX
+#ifndef NODEPP_INVOKE_DMA
+#define NODEPP_INVOKE_DMA
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <pthread.h>
+#include "handler.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { class mutex_t {
+namespace nodepp { template< class... A > class invoker_t {
 protected:
 
-    struct NODE {
-       ~NODE(){ pthread_mutex_destroy(&fd); }
-        pthread_mutex_t fd;
-    };  atomic_ptr_t<NODE> obj;
+    using T = pair_t<function_t<int,A...>,ptr_t<task_t>>;
+    handler_t<T> que;
 
-public:
+public: invoker_t() {}
 
-    mutex_t() : obj( new NODE() ) {
-        if( pthread_mutex_init(&obj->fd,NULL)!=0 )
-          { NODEPP_THROW_ERROR("Cant Start Mutex");  }
-    }
-    
-    /*─······································································─*/
-
-    template< class T, class... V >
-    int operator() ( T callback, const V&... args ) const noexcept { 
-        return emit( callback, args... ); 
-    }
-    
-    /*─······································································─*/
-
-    template< class T, class... V >
-    int emit( T callback, const V&... args ) const noexcept {
-        lock  (); int c=callback( args... ); 
-        unlock(); /*------------*/ return c;
-    }
-
-    template< class T, class... V >
-    void lock( T callback, const V&... args ) const noexcept {
-         lock(); callback( args... ); unlock(); 
-    }
-    
-    /*─······································································─*/
-
-    void unlock() const noexcept { while( !_unlock() ){ /*unused*/ } }
-    void lock  () const noexcept { while( !_lock  () ){ /*unused*/ } }
+    bool  empty() const noexcept { return que.empty(); }
+    ulong size () const noexcept { return que.size (); }
+    void  clear() const noexcept { /*--*/ que.clear(); }
+    void  free () const noexcept { /*--*/ que.clear(); }
 
     /*─······································································─*/
 
-    bool _unlock() const noexcept { return pthread_mutex_unlock(&obj->fd)==0; }
-    bool _lock  () const noexcept { return pthread_mutex_lock  (&obj->fd)==0; }
+    bool is_valid( uchar_64 address ) const noexcept { return que.is_valid( address ); }
+    int  off     ( uchar_64 address ) const noexcept { return que.remove  ( address ); }
+
+    /*─······································································─*/
+
+    handler_t<T> get_handler() const noexcept { return que; }
+
+    /*─······································································─*/
+
+    int emit( uchar_64 address, const A&... arg ) const noexcept {
+    auto mem= que.read( address );
+
+        if( mem.null() ) /*----------------------*/ { return -1; }
+        if( mem->second->flag & TASK_STATE::USED   ){ return -2; }
+
+        mem->second->flag |=  TASK_STATE::USED; 
+        int c = mem->first.emit( arg... );
+        mem->second->flag &=~ TASK_STATE::USED; 
+
+        if( c==-1 )/*-*/{ off( address ); }
+
+    return c; }
+
+    /*─······································································─*/
+
+    uchar_64 add( const function_t<int,A...>& clb ) const noexcept {
+        auto tsk = ptr_t<task_t>( 0UL );
+        auto mid = que.create();
+
+        que.update( mid, { [=]( const A&... args ){ return clb(args...); }, tsk });
+
+        tsk->flag = TASK_STATE::OPEN;
+        tsk->addr = (void*) &que;
+        tsk->sign = (void*) &que;
+        
+    return mid; }
 
 };}
 
