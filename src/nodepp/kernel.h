@@ -9,10 +9,21 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#ifndef NODEPP_KERNEL
-#define NODEPP_KERNEL
+#ifndef NODEPP__KERNEL
+#define NODEPP__KERNEL
 
-#include "./arduino/kernel.h"
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#ifndef NODEPP_EVENT_SCHEDULER
+#define NODEPP_EVENT_SCHEDULER NODEPP_SCHEDULER_LITE
+#endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#include "invoker.h"
+#include "arduino/kernel.h"
+
+/*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
 

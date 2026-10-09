@@ -17,14 +17,16 @@
 namespace nodepp { template< class... A > class event_t {
 protected:
 
-    using  DONE = function_t<bool,A...>;
-    struct NODE {
-        queue_t<DONE> que; void *addr =nullptr;
-        /*--------------*/ int   state=0x00; 
-    };  ptr_t  <NODE> obj;
+    using T = pair_t<function_t<int,A...>,ptr_t<task_t>>;
 
-    enum STATE {
+    struct NODE {
+        queue_t<T>  que ; queue_t<void*> tmp; 
+        uchar state=0x00;
+    };  ptr_t<NODE> obj ;
+
+    enum STATE : uchar {
          EV_STATE_UNKNOWN = 0b00000000,
+         EV_STATE_KILL    = 0b10000000,
          EV_STATE_SKIP    = 0b00000001,
          EV_STATE_STOP    = 0b00000010,
          EV_STATE_USED    = 0b00000100,
@@ -41,88 +43,84 @@ public:
 
     /*─······································································─*/
 
+    ptr_t<task_t> add ( function_t<int,A...> cb ) const noexcept {
+    ptr_t<task_t> task( 0UL, task_t() );
+
+        obj->que.push({ [=]( A... args ){ return cb(args...); }, task });
+        task->flag = TASK_STATE::OPEN;
+        task->addr = obj->que.last() ;
+        task->sign = &obj;
+
+    return task; }
+
     ptr_t<task_t> once( function_t<void,A...> cb ) const noexcept {
-    ptr_t<task_t> task( 0UL, task_t() ); auto clb= type::bind( cb );
+    ptr_t<task_t> task( 0UL, task_t() );
 
-        obj->que.push([=]( A... args ){
-            if( task.null() || clb.null() ) /**/ { return false; }
-            if( task->flag & TASK_STATE::CLOSED ){ return false; }
-                task->flag = TASK_STATE::CLOSED; (*clb)(args...); 
-        return false; });
-
+        obj->que.push({ [=]( A... args ){ cb(args...); return -1; }, task });
         task->flag = TASK_STATE::OPEN;
-        task->addr = obj->que.last();
+        task->addr = obj->que.last() ;
         task->sign = &obj;
 
     return task; }
 
-    ptr_t<task_t> add( function_t<int,A...> cb ) const noexcept {
-    ptr_t<task_t> task( 0UL, task_t() ); auto clb= type::bind( cb );
+    ptr_t<task_t> on  ( function_t<void,A...> cb ) const noexcept {
+    ptr_t<task_t> task( 0UL, task_t() );
 
-        obj->que.push([=]( A... args ){
-            if( task.null() || clb.null() ) /**/ { return false; }
-            if( task->flag & TASK_STATE::CLOSED ){ return false; }
-            if( task->flag & TASK_STATE::USED   ){ return true ; }
-                task->flag|= TASK_STATE::USED;   
-            int c=(*clb)(args...); if(clb.null()){ return false; }
-                task->flag&=~TASK_STATE::USED;
-        return c==-1 ? false : true; });
-
+        obj->que.push({ [=]( A... args ){ cb(args...); return  1; }, task });
         task->flag = TASK_STATE::OPEN;
-        task->addr = obj->que.last();
-        task->sign = &obj;
-
-    return task; }
-
-    ptr_t<task_t> on( function_t<void,A...> cb ) const noexcept {
-    ptr_t<task_t> task( 0UL, task_t() ); auto clb= type::bind( cb );
-
-        obj->que.push([=]( A... args ){
-            if( task.null() || clb.null() ) /**/ { return false; }
-            if( task->flag & TASK_STATE::CLOSED ){ return false; }
-            if( task->flag & TASK_STATE::USED   ){ return true ; }
-                task->flag|= TASK_STATE::USED;
-            (*clb)(args...); if(clb.null()) /**/ { return false; }
-                task->flag&=~TASK_STATE::USED;
-        return true; });
-
-        task->flag = TASK_STATE::OPEN;
-        task->addr = obj->que.last();
+        task->addr = obj->que.last() ;
         task->sign = &obj;
 
     return task; }
 
     /*─······································································─*/
 
-    void off( ptr_t<task_t> address ) const noexcept {
-        if( address.null() ) /*--------------*/ { return; }
+    void off  ( ptr_t<task_t> address ) const noexcept { clear( address ); }
+    void clear( ptr_t<task_t> address ) const noexcept {
+        if( address.null() || empty() ) /*---*/ { return; }
         if( address->flag & TASK_STATE::CLOSED ){ return; }
         if( address->sign != &obj ) /*-------*/ { return; }
+            auto node = obj->que.as( address->addr ); 
+        if( node == nullptr ) /*-------------*/ { return; }
             address->flag = TASK_STATE::CLOSED;
-        auto node = obj->que.as( address->addr ); 
-        if( obj->addr == address->addr ){ obj->addr = node->next; }
-        if( node != nullptr ) /*-----*/ { obj->que.erase( node ); }
+        if( is_used() ){ obj->tmp.push ( address->addr ); }
+        else /*-----*/ { obj->que.erase( node ); }
+    }
+
+    /*─······································································─*/
+
+    void clear() const noexcept { 
+        if( obj->state &  STATE::EV_STATE_USED )
+          { obj->state |= STATE::EV_STATE_KILL; return; }  
+            obj->state &=~STATE::EV_STATE_KILL;
+        obj->que.clear();
     }
 
     /*─······································································─*/
 
     bool  empty() const noexcept { return obj->que.empty(); }
     ulong  size() const noexcept { return obj->que.size (); }
-    void  clear() const noexcept { /*--*/ obj->que.clear(); }
 
     /*─······································································─*/
 
     void emit( const A&... args ) const noexcept {
-        if( obj.null() || is_paused() || is_used() ){ return; }
+    if( is_paused() || is_used() || empty() ){ return; }
 
-        obj->state |= STATE::EV_STATE_USED;
-        auto x=obj->que.first();
+        obj->state|= STATE::EV_STATE_USED;
 
-        while( x!=nullptr && obj->que.is_valid(x) ){ obj->addr=x->next;
-        if   ( !x->data.emit(args...) ) /*------*/ { obj->que.erase(x); }
-        x = obj->que.as( obj->addr ); }
+        auto x = obj->que.first(); while( x != nullptr ){
+        auto y = x->next ; 
 
-        obj->state &=~ STATE::EV_STATE_USED;
+            if(( x->data.second->flag & STATE::EV_STATE_CLOSED ) ||
+                 x->data.first.emit(args...)==-1
+            )  { obj->que.erase( x ); }
+
+        x=y; }
+
+        obj->tmp.map([&]( void* item ){ obj->que.erase( obj->que.as(item) ); });
+        /**/obj->state &=~ STATE::EV_STATE_USED; obj->tmp.clear();
+        if( obj->state &   STATE::EV_STATE_KILL ){ clear(); }
+
     }
 
     /*─······································································─*/
@@ -154,3 +152,5 @@ public:
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

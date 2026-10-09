@@ -16,6 +16,8 @@
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #include "initializer.h"
+#include "crypto.h"
+
 #include "mbedtls/ssl.h"
 #include "mbedtls/error.h"
 #include "mbedtls/entropy.h"
@@ -29,7 +31,7 @@ protected:
     using onSNI = function_t<ssl_t*,string_t>;
     using onALP = function_t<bool  ,string_t>;
 
-    enum STATE { 
+    enum STATE : uchar { 
          SSL_STATE_UNKNOWN   = 0b00000000,
          SSL_STATE_USED      = 0b00000010,
          SSL_STATE_CONNECTED = 0b00000001,
@@ -47,10 +49,10 @@ protected:
         
         string_t key_path, crt_path, alpn;
         ptr_t<string_t> protocol_list;
-        ptr_t<char*>    tmp_list;
+        ptr_t<char*>    alpn_list;
         ptr_t<onSNI>    sni;
 
-        int state = 0;
+        uchar state = 0;
 
         NODE() {
             mbedtls_ssl_init       (&ssl) ;
@@ -82,22 +84,53 @@ protected:
 
     /*─······································································─*/
 
-    static int bio_send(void *ctx, const uchar *buf, size_t len) {
-        auto stream = (socket_t*)ctx;
-        int ret = stream->__write((char*)buf, len);
-        if( ret == -2 ){ return MBEDTLS_ERR_SSL_WANT_WRITE; }
-    return ret; }
+    static int bio_write( void *b, const uchar *buf, size_t len ) {
+    if( b==nullptr ){ return -1; }
 
-    static int bio_recv(void *ctx, uchar *buf, size_t len) {
-        auto stream = (socket_t*)ctx;
-        int ret = stream->__read((char*)buf, len);
-        if( ret == -2 ){ return MBEDTLS_ERR_SSL_WANT_READ; }
-    return ret; }
+        auto stream = (socket_t*)b;
+        auto nlen   = min( (ulong)len, stream->get_buffer_size() );
+
+        if( stream->is_closed() ){ return -1; }
+        int c = stream->socket_t::__write( (char*)buf, nlen ); 
+
+        if  ( c<=0 ){
+        if  ( stream->socket_t::is_waiting() )
+            { return MBEDTLS_ERR_SSL_WANT_WRITE; }
+        else{ stream->socket_t::stop(); return -1; }}
+
+    return c; }
+
+    static int bio_read( void *b, uchar *buf, size_t len ) {
+    if( b==nullptr ){ return -1; }
+
+        auto stream = (socket_t*) b;
+        auto nlen   = min( (ulong)len, stream->get_buffer_size() );
+
+        if( stream->is_closed() ){ return -1; }
+        int c = stream->socket_t::__read( buf, nlen );
+
+        if  ( c<=0 ){
+        if  ( stream->socket_t::is_waiting() )
+            { return MBEDTLS_ERR_SSL_WANT_READ; }
+        else{ stream->socket_t::stop(); return -1; }}
+
+    return c; }
+    
+    /*─······································································─*/
+
+    template< class T >
+    int is_blocked( T* stream, int c ) const noexcept { 
+    if( c<=0 && !stream->is_closed() ){
+
+        if( c==MBEDTLS_ERR_SSL_WANT_WRITE ||
+            c==MBEDTLS_ERR_SSL_WANT_READ
+        ) { return 1; }
+
+    } return stream->is_closed() ? -1 : c; }
 
     /*─······································································─*/
 
-    static int sni_callback(void *arg, mbedtls_ssl_context *ssl, const uchar *name, size_t len) {
-
+    static int sni_callback( void *arg, mbedtls_ssl_context *ssl, const uchar *name, size_t len ) {
         if( name==nullptr || ssl==nullptr || arg==nullptr || len==0 ){ return 0; }
         
         onSNI func = *((onSNI*)arg); 
@@ -115,73 +148,89 @@ protected:
 
     /*─······································································─*/
 
+    int configure_context( int mode ) { 
+    int x = 1; 
+
+        mbedtls_ssl_config_defaults(&obj->conf, mode & STATE::SSL_STATE_SERVER ? 
+                                     MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
+                                     MBEDTLS_SSL_TRANSPORT_STREAM, 
+                                     MBEDTLS_SSL_PRESET_DEFAULT
+        );
+
+        mbedtls_ssl_conf_rng(&obj->conf, mbedtls_ctr_drbg_random, &obj->ctr_drbg);
+
+        if( !obj->alpn_list.null() ) 
+          { mbedtls_ssl_conf_alpn_protocols(&obj->conf, (const char**)obj->alpn_list.get()); }
+
+        if( mode & STATE::SSL_STATE_SERVER ) {
+            
+            if( obj->cert != nullptr ) {
+            if( mbedtls_ssl_conf_own_cert(&obj->conf, &obj->cert, &obj->pkey) != 0 ) 
+              { return -1; } }
+
+            elif( !obj->crt_path.empty() && !obj->key_path.empty() ) {
+                
+                if( mbedtls_x509_crt_parse_file(&obj->cert, obj->crt_path.get()) != 0 ){ return -1; }
+                if( mbedtls_pk_parse_keyfile(&obj->pkey, obj->key_path.get(), NULL, mbedtls_ctr_drbg_random, &obj->ctr_drbg ) != 0 
+                ) { return -1; }
+                if( mbedtls_ssl_conf_own_cert(&obj->conf, &obj->cert, &obj->pkey) != 0 ){ return -1; }
+
+            } else { return -1; }
+
+            mbedtls_ssl_conf_authmode(&obj->conf, MBEDTLS_SSL_VERIFY_NONE);
+            
+            if( obj->cert.next != nullptr ) {
+                mbedtls_ssl_conf_ca_chain(&obj->conf, obj->cert.next, NULL);
+            }
+
+            if( obj->sni != nullptr ) {
+                mbedtls_ssl_conf_sni(&obj->conf, sni_callback, obj->sni.get());
+            }
+
+        }
+
+        // mbedtls_ssl_conf_min_version(&obj->conf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_3);
+
+        return 1; 
+    }
+
+    /*─······································································─*/
+
 public:
 
     ssl_t() : obj( new NODE() ) {
+    NODEPP_CRYPTO_INITIALIZATOR();
         mbedtls_ctr_drbg_seed(&obj->ctr_drbg, mbedtls_entropy_func, &obj->entropy, NULL, 0);
         obj->state = STATE::SSL_STATE_USED;
     }
 
-    ssl_t( const string_t& key, const string_t& cert ) : ssl_t() {
+    ssl_t( const string_t& key, const string_t& cert ) : obj( new NODE() ) {
+    NODEPP_CRYPTO_INITIALIZATOR();
+        mbedtls_ctr_drbg_seed(&obj->ctr_drbg, mbedtls_entropy_func, &obj->entropy, NULL, 0);
         obj->key_path = key; obj->crt_path = cert;
         obj->state = STATE::SSL_STATE_USED;
     }
 
-    ssl_t( ssl_t& xtc, int /*unused*/ ) : obj( new NODE() ) { obj->state = xtc.obj->state;
+    ssl_t( ssl_t& xtc, int /*unused*/ ) : obj( new NODE() ) { 
+    NODEPP_CRYPTO_INITIALIZATOR();
         mbedtls_ctr_drbg_seed(&obj->ctr_drbg, mbedtls_entropy_func, &obj->entropy, NULL, 0);
         mbedtls_ssl_setup(&obj->ssl, &xtc.obj->conf);
         obj->alpn  = xtc.get_alpn_protocol();
-        obj->state = STATE::SSL_STATE_USED;
+        obj->state = STATE::SSL_STATE_USED; obj->state = xtc.obj->state;
     }
 
     /*─······································································─*/
 
-    int create_server() { obj->state |= STATE::SSL_STATE_SERVER;
+    int create_server() { return configure_context( STATE::SSL_STATE_SERVER ); }
 
-        mbedtls_ssl_config_defaults(&obj->conf, MBEDTLS_SSL_IS_SERVER, 
-                                    MBEDTLS_SSL_TRANSPORT_STREAM, 
-                                    MBEDTLS_SSL_PRESET_DEFAULT
-        );
-        
-        if( !obj->crt_path.empty() )
-          { mbedtls_x509_crt_parse_file(&obj->cert, obj->crt_path.get()); }
-        if( !obj->key_path.empty() ){
-            mbedtls_pk_parse_keyfile(&obj->pkey, obj->key_path.get(), NULL, 
-                                     mbedtls_ctr_drbg_random, &obj->ctr_drbg);
-        }
-
-        mbedtls_ssl_conf_ca_chain(&obj->conf, obj->cert.next, NULL);
-        mbedtls_ssl_conf_own_cert(&obj->conf,&obj->cert,&obj->pkey);
-        mbedtls_ssl_conf_rng(&obj->conf, mbedtls_ctr_drbg_random, &obj->ctr_drbg);
-
-        if( obj->sni != nullptr )
-          { mbedtls_ssl_conf_sni(&obj->conf, sni_callback, obj->sni.get()); }
-
-        mbedtls_ssl_conf_alpn_protocols( &obj->conf, (const char**)obj->tmp_list.get() );
-
-    return 1; }
-
-    /*─······································································─*/
-
-    int create_client() { obj->state &= ~STATE::SSL_STATE_SERVER;
-
-        mbedtls_ssl_config_defaults(&obj->conf, MBEDTLS_SSL_IS_CLIENT, 
-                                    MBEDTLS_SSL_TRANSPORT_STREAM, 
-                                    MBEDTLS_SSL_PRESET_DEFAULT
-        );
-
-        mbedtls_ssl_conf_authmode(&obj->conf, MBEDTLS_SSL_VERIFY_NONE );
-        mbedtls_ssl_conf_rng     (&obj->conf, mbedtls_ctr_drbg_random, &obj->ctr_drbg);
-        mbedtls_ssl_conf_alpn_protocols( &obj->conf, (const char**)obj->tmp_list.get() );
-
-    return 1; }
+    int create_client() { return configure_context( 0x00 ); }
 
     /*─······································································─*/
 
     void set_password( const char* /*pass*/ ) const noexcept {
-    //  if( !is_available() ){ return; }
-    //  SSL_CTX_set_default_passwd_cb( obj->ctx, &SNI_CLB );
-    //  SSL_CTX_set_default_passwd_cb_userdata( obj->ctx, (void*)pass );
+    //   if( !is_available() ){ return; }
+    //   SSL_CTX_set_default_passwd_cb( obj->ctx, &SNI_CLB );
+    //   SSL_CTX_set_default_passwd_cb_userdata( obj->ctx, (void*)pass );
     }
 
     int set_hostname( const string_t& name ) const noexcept {
@@ -196,13 +245,24 @@ public:
 
     /*─······································································─*/
 
-    template<class T>
-    int _connect( T* stream ) {
-        mbedtls_ssl_set_bio(&obj->ssl, stream, bio_send, bio_recv, NULL);
-        int ret =mbedtls_ssl_handshake(&obj->ssl);
-        if( ret==MBEDTLS_ERR_SSL_WANT_READ || ret==MBEDTLS_ERR_SSL_WANT_WRITE ){ return -2; }
-        obj->alpn = ret==0 ? mbedtls_ssl_get_alpn_protocol( &obj->ssl ) : nullptr;
-    return (ret==0) ? 1 : -1; }
+    template<class T> int _connect( T* stream ) const noexcept {
+        if( is_connected() ){ return 1; }
+
+        mbedtls_ssl_set_bio( &obj->ssl, (void*)stream, bio_write, bio_read, NULL );
+        
+        int c = mbedtls_ssl_handshake( &obj->ssl ); 
+        
+        if( c==MBEDTLS_ERR_SSL_WANT_WRITE ||
+            c==MBEDTLS_ERR_SSL_WANT_READ
+        ) { return -2; }
+
+        if( c == 0 ) {
+            obj->state |= STATE::SSL_STATE_CONNECTED;
+            const char* alpn = mbedtls_ssl_get_alpn_protocol( &obj->ssl );
+            obj->alpn = alpn ? alpn : "";
+        return 1; }
+
+    return -1; }
 
     /*─······································································─*/
 
@@ -216,39 +276,49 @@ public:
 
     template<class T>
     int __read( T* stream, char* bf, ulong sx ) const noexcept {
-        int ret =  mbedtls_ssl_read(&obj->ssl, (uchar*)bf, sx);
-        if( ret == MBEDTLS_ERR_SSL_WANT_READ ){ return -2; }
-    return ret; }
+        if( !is_available() || stream->is_closed() ){ return -1; }
+        
+        int conn = _connect ( stream );
+        if( conn<= 0 ){ return conn; }
+
+        mbedtls_ssl_set_bio(&obj->ssl, (void*)stream, bio_write, bio_read, NULL);
+        int c = mbedtls_ssl_read( &obj->ssl, (uchar*)bf, sx ); 
+        
+    return is_blocked(c); }
 
     template<class T>
     int __write( T* stream, char* bf, ulong sx ) const noexcept {
-        int ret =  mbedtls_ssl_write(&obj->ssl, (const uchar*)bf, sx);
-        if( ret == MBEDTLS_ERR_SSL_WANT_WRITE ){ return -2; }
-    return ret; }
+        if( !is_available() || stream->is_closed() ){ return -1; }
+        
+        int conn = _connect ( stream );
+        if( conn<= 0 ){ return conn; }
+
+        mbedtls_ssl_set_bio(&obj->ssl, (void*)stream, bio_write, bio_read, NULL);
+        int c =  mbedtls_ssl_write( &obj->ssl, (const uchar*)bf, sx );
+        
+    return is_blocked(c); }
 
     /*─······································································─*/
 
     template< class T >
     int _write_( T* stream, char* bf, const ulong& sx, ulong* sy ) const noexcept {
-        if( sx==0 || stream->is_closed() ){ return -1; } while( *sy<sx ) {
-            int c = __write( stream, bf + *sy, sx - *sy );
-            if( c <= 0 && c != -2 ) /*----*/ { return -2; }
-            if( c >  0 ){ *sy+= c; continue; } break/**/;
-        }   return sx;
-    }
+    if( sx==0 || stream->is_closed() ){ return -1; } while( *sy<sx ) {
+        int c = __write( stream, bf + *sy, sx - *sy );
+        if( c==-2 ) /*--*/ { return -2; }
+        if( c > 0 ){ *sy+= c; continue; } 
+    break; } return *sy; }
 
     template< class T >
     int _read_( T* stream, char* bf, const ulong& sx, ulong* sy ) const noexcept {
-        if( sx==0 || stream->is_closed() ){ return -1; } while( *sy<sx ) {
-            int c = __read( stream, bf + *sy, sx - *sy );
-            if( c <= 0 && c != -2 ) /*----*/ { return -2; }
-            if( c >  0 ){ *sy+= c; continue; } break/**/;
-        }   return sx;
-    }
+    if( sx==0 || stream->is_closed() ){ return -1; } while( *sy<sx ) {
+        int c = __read( stream, bf + *sy, sx - *sy );
+        if( c==-2 ) /*--*/ { return -2; }
+        if( c > 0 ){ *sy+= c; continue; } 
+    break; } return *sy; }
 
     /*─······································································─*/
 
-    void set_sni_callback ( onSNI  callback ) const noexcept { 
+    void set_sni_callback ( const onSNI& callback ) const noexcept { 
          obj->sni = type::bind( callback ); 
     }
 
@@ -260,11 +330,11 @@ public:
     if( protocol_list.empty() ){ return -1; }
         obj->protocol_list = protocol_list;
 
-        obj->tmp_list.resize( protocol_list.size()+1 );
-        obj->tmp_list.fill  ( nullptr );
+        obj->alpn_list.resize( protocol_list.size()+1 );
+        obj->alpn_list.fill  ( nullptr );
 
         for( int x=protocol_list.size(); x-->0; ){ 
-             obj->tmp_list[x] = protocol_list[x].get(); 
+             obj->alpn_list[x] = protocol_list[x].get(); 
         }
 
     return  1; }

@@ -12,7 +12,18 @@
 #ifndef NODEPP_CRYPTO
 #define NODEPP_CRYPTO
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
-#define CRYPTO_BASE64 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#define NODEPP_BASE58 "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" 
+#define NODEPP_BASE64 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#define NODEPP_CRYPTO_INITIALIZATOR() /*unused*/
+#define MBEDTLS_PLATFORM_MEMORY
+#define MBEDTLS_PLATFORM_FREE_MACRO   NODEPP_ALLOC().free
+#define MBEDTLS_PLATFORM_CALLOC_MACRO NODEPP_ALLOC().calloc
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
@@ -30,12 +41,11 @@
 #include <mbedtls/bignum.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
+#include <mbedtls/platform.h>
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp {
-
-class hash_t {
+namespace nodepp { class hash_t {
 protected:
 
     struct NODE {
@@ -49,13 +59,13 @@ protected:
        ~NODE() { mbedtls_md_free(&ctx); }
     };  ptr_t<NODE> obj;
 
-    string_t hex() const noexcept { free(); 
-        return { (char*)obj->bff.data(), obj->length }; 
-    }
+    string_t hex() const noexcept { 
+    free(); return string_t( (char*)obj->bff.data(), obj->length ); }
 
 public:
 
     hash_t( mbedtls_md_type_t type, ulong output_length ) : obj( new NODE() ) { 
+    NODEPP_CRYPTO_INITIALIZATOR();
         
         obj->bff    = ptr_t<uchar>( output_length );
         obj->length = output_length;
@@ -65,14 +75,12 @@ public:
         if ( info == NULL || 
              mbedtls_md_setup ( &obj->ctx, info, 0 ) != 0 || 
              mbedtls_md_starts( &obj->ctx )          != 0 
-        )  { ARDUINO_ERROR("can't initialize mbedtls hash_t"); }
+        )  { NODEPP_THROW_ERROR("can't initialize mbedtls hash_t"); }
         
         obj->state = 1;
     }
 
-   ~hash_t() noexcept { 
-        if( obj.count() > 1 ){ return; } free(); 
-    }
+   ~hash_t() noexcept { if( obj.count() > 1 ){ return; } free(); }
 
     void update( string_t msg ) const noexcept { 
         if( !obj->state ){ return; } 
@@ -88,16 +96,16 @@ public:
     bool is_closed   () const noexcept { return obj->state == 0; }
 
     string_t get() const noexcept { 
-        return encoder::buffer::buff2hex( this->hex() );
+        return encoder::base16::atob( this->hex() );
     }
 
     void close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class hmac_t {
+namespace nodepp { class hmac_t {
 protected:
 
     struct NODE {
@@ -111,15 +119,16 @@ protected:
        ~NODE() { mbedtls_md_free(&ctx); }
     };  ptr_t<NODE> obj;
 
-    string_t hex() const noexcept { free(); 
-        return { (char*)obj->bff.data(), obj->length }; 
-    }
+    string_t hex() const noexcept {
+    free(); return string_t( (char*)obj->bff.data(), obj->length ); }
 
 public:
 
     template< class T >
     hmac_t( const string_t& key, const T& type, ulong length ) : obj( new NODE() ) { 
-        if( key.empty() ){ ARDUINO_ERROR("can't initializate hmac_t"); }
+    NODEPP_CRYPTO_INITIALIZATOR();
+
+        if( key.empty() ){ NODEPP_THROW_ERROR("can't initializate hmac_t"); }
 
         obj->bff    = ptr_t<uchar>( length ); 
         obj->length = (uint)length;
@@ -128,7 +137,7 @@ public:
 
         if ( info == nullptr ||  mbedtls_md_setup( &obj->ctx, info, 1 )                != 0 || 
              mbedtls_md_hmac_starts( &obj->ctx, (const uchar*)key.data(), key.size() ) != 0 
-        )  { ARDUINO_ERROR("can't initialize mbedtls hmac_t"); }
+        )  { NODEPP_THROW_ERROR("can't initialize mbedtls hmac_t"); }
 
         obj->state = 1;
     }
@@ -147,17 +156,17 @@ public:
         mbedtls_md_hmac_finish( &obj->ctx, (uchar*)obj->bff.data() ); 
     }
 
-    string_t get() const noexcept { return encoder::buffer::buff2hex( this->hex() ); }
+    string_t get() const noexcept { return encoder::base16::atob( this->hex() ); }
 
     bool is_available() const noexcept { return obj->state == 1; }
     bool    is_closed() const noexcept { return obj->state == 0; }
     void        close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class xor_t {
+namespace nodepp { class xor_t {
 protected:
 
     struct CTX {
@@ -177,8 +186,10 @@ public:
     event_t<string_t> onData;
 
     xor_t( const string_t& key ) : obj( new NODE() ) {
-        if( key.empty() ){ ARDUINO_ERROR("can't initializate xor_t"); }
-
+    NODEPP_CRYPTO_INITIALIZATOR();
+    
+        if( key.empty() ){ NODEPP_THROW_ERROR("can't initializate xor_t"); }
+    
         CTX item1; //memset( &item1, 0, sizeof(CTX) );
             item1.key  = key; item1.pos = 0;
             obj->state = 1;
@@ -186,41 +197,43 @@ public:
         obj->ctx = ptr_t<CTX> ({ item1 });
     }
 
-    xor_t() noexcept : obj( new NODE() ) { obj->state = 0; }
+    xor_t() noexcept : obj( new NODE() ) {
+        NODEPP_CRYPTO_INITIALIZATOR(); obj->state = 0; 
+    }
     
    ~xor_t() noexcept { if( obj.count()>1 ){ return; } free(); }
 
     void update( string_t msg ) const noexcept { 
-        if( !obj->state ){ return; } ulong chunk=0, /*-------------*/ base=CHUNK_SIZE;
-        while( chunk < msg.size() ){ string_t tmp = msg.slice_view( chunk, chunk + base );
-            forEach( y, obj->ctx ){ forEach( x, tmp ){ 
-                x = x ^ y.key[ y.pos % y.key.size() ]; ++y.pos; 
-            }} if ( tmp.empty() )     { return; }
-             elif ( onData.empty() )  { obj->bff +=tmp; }
-             else { onData.emit(tmp); }
-        chunk += base; }
+        if( !obj->state ){ return; } ulong chunk = NODEPP_CHUNK_SIZE;
+        while( !msg.empty()   )  { auto tmp = msg.slice( 0, chunk );
+        for  ( auto &x: tmp   )  { CTX   &y = obj->ctx [ 0 ];
+            x ^= y.key[ y.pos ]; y.pos += ( y.pos+1 )% y.key.size(); 
+        } if ( tmp   .empty() )  { return; }
+        elif ( onData.empty() )  { obj->bff +=tmp; }
+        else { onData.emit(tmp); } msg.ptr().slice( chunk, (ulong)-1 ); }
     }
 
     bool is_available() const noexcept { return obj->state == 1; }
 
-    bool is_closed() const noexcept { return obj->state == 0; }
+    bool    is_closed() const noexcept { return obj->state == 0; }
 
-    string_t get() const noexcept { free(); return obj->bff; }
+    string_t      get() const noexcept { free(); return obj->bff; }
 
     void free() const noexcept { 
-        if ( obj->state == 0 ){ return; } 
-             obj->state = 0; onClose.emit(); 
-             onData.clear();
+        if( obj->state == 0 ){ return; } 
+        obj->state = 0; onClose.emit (); 
+        onData.clear(); onClose.clear();
     }
 
     void close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class encrypt_t {
+namespace nodepp { class encrypt_t {
 protected:
+
     struct NODE {
         ptr_t<uchar> bff; string_t buff;
         mbedtls_cipher_context_t ctx;
@@ -233,14 +246,14 @@ protected:
     };  ptr_t<NODE> obj;
 
     void _init_( mbedtls_cipher_type_t type, const string_t& key, const string_t& iv ) {
-        if( key.empty() ){ ARDUINO_ERROR("can't initializate encrypt_t"); }
+        if( key.empty() ){ NODEPP_THROW_ERROR("can't initializate encrypt_t"); }
 
         const mbedtls_cipher_info_t* info = mbedtls_cipher_info_from_type(type);
-        if( !info ){ ARDUINO_ERROR("Unsupported cipher type"); }
+        if( !info ){ NODEPP_THROW_ERROR("Unsupported cipher type"); }
 
         uint ky_size = mbedtls_cipher_info_get_key_bitlen(info) / 8;
         uint iv_size = MBEDTLS_MAX_IV_LENGTH;
-        obj->bff     = ptr_t<uchar>(CHUNK_SIZE,'\0');
+        obj->bff     = ptr_t<uchar>(NODEPP_CHUNK_SIZE,'\0');
         obj->state   = 1;
 
         ptr_t<uchar> nkey( (ulong)ky_size, 0x00 );
@@ -249,13 +262,13 @@ protected:
         memcpy( niv .get(), iv .get(), min( niv .size(), iv .size() ) );
 
         if( mbedtls_cipher_setup(&obj->ctx, info)!=0 )
-          { ARDUINO_ERROR("mbedtls _init_ failed"); }
+          { NODEPP_THROW_ERROR("mbedtls _init_ failed"); }
 
         if( mbedtls_cipher_setkey(&obj->ctx, nkey.get(), nkey.size() * 8, MBEDTLS_ENCRYPT )!=0 ) 
-          { ARDUINO_ERROR("mbedtls encrypt setkey failed"); }
+          { NODEPP_THROW_ERROR("mbedtls encrypt setkey failed"); }
         
         if( mbedtls_cipher_set_iv(&obj->ctx, niv.get(), mbedtls_cipher_get_iv_size(&obj->ctx))!=0 )
-          { ARDUINO_ERROR("mbedtls set_iv failed"); }
+          { NODEPP_THROW_ERROR("mbedtls set_iv failed"); }
 
         mbedtls_cipher_reset(&obj->ctx); 
     //  mbedtls_cipher_set_padding_mode(&obj->ctx, MBEDTLS_PADDING_PKCS7);
@@ -267,11 +280,11 @@ public:
     event_t<>         onClose;
 
     encrypt_t( const string_t& iv, const string_t& key, mbedtls_cipher_type_t type ) : obj( new NODE() ) { 
-        _init_(type, key, iv);
+        NODEPP_CRYPTO_INITIALIZATOR(); _init_(type, key, iv);
     }
 
-    encrypt_t( const string_t& key, mbedtls_cipher_type_t type ) : obj( new NODE() ) { 
-        _init_(type, key, nullptr); 
+    encrypt_t( const string_t& key, mbedtls_cipher_type_t type ) : obj( new NODE() ) {     
+        NODEPP_CRYPTO_INITIALIZATOR(); _init_(type, key, nullptr); 
     }
 
    ~encrypt_t() noexcept { if( obj.count() > 1 ){ return; } free(); }
@@ -299,7 +312,8 @@ public:
                  obj->buff += chunk;
         } else { onData.emit(chunk); }} }
 
-        onClose.emit(); onData.clear();
+        onClose.emit (); /*------------*/
+        onData .clear(); onClose.clear();
     }
 
     bool is_available() const noexcept { return obj->state == 1; }
@@ -307,11 +321,11 @@ public:
     bool    is_closed() const noexcept { return obj->state == 0; }
     void        close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class decrypt_t {
+namespace nodepp { class decrypt_t {
 protected:
 
     struct NODE {
@@ -326,14 +340,14 @@ protected:
     };  ptr_t<NODE> obj;
 
     void _init_(mbedtls_cipher_type_t type, const string_t& key, const string_t& iv) {
-        if( key.empty() ){ ARDUINO_ERROR("can't initializate decrypt_t"); }
+        if( key.empty() ){ NODEPP_THROW_ERROR("can't initializate decrypt_t"); }
 
         const mbedtls_cipher_info_t* info = mbedtls_cipher_info_from_type(type);
-        if( !info ){ ARDUINO_ERROR("Unsupported cipher type"); }
+        if( !info ){ NODEPP_THROW_ERROR("Unsupported cipher type"); }
 
         uint ky_size = mbedtls_cipher_info_get_key_bitlen(info) / 8;
         uint iv_size = MBEDTLS_MAX_IV_LENGTH;
-        obj->bff     = ptr_t<uchar>(CHUNK_SIZE,'\0');
+        obj->bff     = ptr_t<uchar>(NODEPP_CHUNK_SIZE,'\0');
         obj->state   = 1;
 
         ptr_t<uchar> nkey( (ulong)ky_size, 0x00 );
@@ -342,13 +356,13 @@ protected:
         memcpy( niv .get(), iv .get(), min( niv .size(), iv .size() ) );
 
         if( mbedtls_cipher_setup(&obj->ctx, info)!=0 )
-          { ARDUINO_ERROR("mbedtls _init_ failed"); }
+          { NODEPP_THROW_ERROR("mbedtls _init_ failed"); }
 
         if( mbedtls_cipher_setkey(&obj->ctx, nkey.get(), nkey.size() * 8, MBEDTLS_DECRYPT )!=0 ) 
-          { ARDUINO_ERROR("mbedtls decrypt setkey failed"); }
+          { NODEPP_THROW_ERROR("mbedtls decrypt setkey failed"); }
         
         if( mbedtls_cipher_set_iv(&obj->ctx, niv.get(), mbedtls_cipher_get_iv_size(&obj->ctx))!=0 )
-          { ARDUINO_ERROR("mbedtls set_iv failed"); }
+          { NODEPP_THROW_ERROR("mbedtls set_iv failed"); }
         
         mbedtls_cipher_reset(&obj->ctx); 
     //  mbedtls_cipher_set_padding_mode(&obj->ctx, MBEDTLS_PADDING_PKCS7);
@@ -360,12 +374,12 @@ public:
 
     template< class T >
     decrypt_t( const string_t& key, const T& type ) : obj( new NODE() ) { 
-        _init_(type, key, nullptr); 
+        NODEPP_CRYPTO_INITIALIZATOR(); _init_(type, key, nullptr); 
     }
 
     template< class T >
     decrypt_t( const string_t& iv, const string_t& key, const T& type ) : obj( new NODE() ) { 
-        _init_(type, key, iv);
+        NODEPP_CRYPTO_INITIALIZATOR(); _init_(type, key, iv);
     }
 
    ~decrypt_t() noexcept { if( obj.count() > 1 ){ return; } free(); }
@@ -373,25 +387,18 @@ public:
     void update( string_t msg ) const noexcept { 
         if( !obj->state ){ return; }
         if( mbedtls_cipher_update(&obj->ctx, (const uchar*)msg.data(), msg.size(), 
-                                  obj->bff.get(), &obj->out_len) == 0
-        ) { if( obj->out_len>0 ) {
-            string_t chunk((char*)obj->bff.get(), (ulong)obj->out_len);
-        if( onData.empty() ) {
-                 obj->buff += chunk;
-        } else { onData.emit(chunk); }}}
+                                  obj->bff.get(), &obj->out_len) == 0 ){
+        if( obj->out_len==0 ){ return; }
+            obj->buff += string_t ((char*)obj->bff.get(), (ulong)obj->out_len);
+        }
     }
 
     void free() const noexcept { 
         if( obj->state == 0 ){ return; } obj->state = 0;
-
-        if( mbedtls_cipher_finish(&obj->ctx, obj->bff.get(), &obj->out_len)==0 )
-          { if( obj->out_len>0 ) {
-            string_t chunk((char*)obj->bff.get(), (ulong)obj->out_len);
-        if( onData.empty() ) {
-                 obj->buff += chunk;
-        } else { onData.emit(chunk); }}}
-        
-        onClose.emit(); onData.clear();
+        if( mbedtls_cipher_finish(&obj->ctx, obj->bff.get(), &obj->out_len)==0 ){ 
+        if( obj->out_len == 0 ) { return; }
+            obj->buff += string_t ((char*)obj->bff.get(), (ulong)obj->out_len);
+        }
     }
 
     bool is_available() const noexcept { return obj->state == 1; }
@@ -399,160 +406,77 @@ public:
     bool    is_closed() const noexcept { return obj->state == 0; }
     void        close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class encoder_t {
+namespace nodepp { class base58_encoder_t {
 protected:
-    struct NODE {
-        
-        bool state=0; mbedtls_mpi bn; 
-        queue_t<string_t> bff;
-        string_t chr; 
 
-        NODE() { mbedtls_mpi_init(&bn); }
-       ~NODE() { mbedtls_mpi_free(&bn); }
-    }; 
-    ptr_t<NODE> obj;
-
-    string_t encode(string_t msg) const noexcept {
-        if( msg.empty() ){ return ""; }
-
-        mbedtls_mpi_lset(&obj->bn, 0); string_t result;
-        mbedtls_mpi_uint base = (mbedtls_mpi_uint)obj->chr.size();
-        mbedtls_mpi_read_binary(&obj->bn, (const unsigned char*)msg.data(), msg.size());
-
-        while( mbedtls_mpi_cmp_int(&obj->bn, 0)>0 ) { mbedtls_mpi_uint r_val;
-           if( mbedtls_mpi_mod_int(&r_val, &obj->bn, base) /*------*/ !=0 ) break;
-           if( mbedtls_mpi_div_int(&obj->bn, nullptr, &obj->bn, base) !=0 ) break;
-
-            result.unshift(obj->chr[(size_t)r_val]);
-        }
-
-        for( size_t i = 0; i<msg.size() && (unsigned char)msg[i]==0; i++ ) 
-           { result.unshift(obj->chr[0]); }
-
-        if (!onData.empty()){ onData.emit(result); }
-        return result;
-    }
+    struct NODE { queue_t<string_t> bff; bool state=0; }; ptr_t<NODE> obj;
 
 public:
-    event_t<string_t> onData;
-    event_t<>         onClose;
+  
+   ~base58_encoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
+    base58_encoder_t() : obj( new NODE() ) { obj->state = 1; }
 
-    encoder_t(const string_t& chr) : obj(0UL, NODE()) { 
-        obj->state = 1; obj->chr = chr;
-    }
-    
-   ~encoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
-
-    string_t get() const noexcept { 
-        if (obj->state == 0) return nullptr;
-        auto raw = array_t<string_t>(obj->bff.data()).join(nullptr);
-        auto data = encode(raw); 
-        free(); 
-        return data; 
+    string_t get() const noexcept { if( obj->state == 0 ){ return nullptr; }
+        auto raw = string::join( obj->bff, "" );
+        auto data= encoder::base58::atob( raw ); free(); return data; 
     }
 
-    void update(const string_t& msg) const noexcept { 
-        if(!obj->state) return; 
-        obj->bff.push(msg);
+    void update( const string_t& msg ) const noexcept { 
+         if( obj->state!=1 ){ return; } obj->bff.push( msg );
     }
 
     void free() const noexcept { 
-        if( obj->state==0 ){return; } obj->state = 0;
-        onClose.emit(); onData.clear();
+        if( obj->state == 1 ){ return; } obj->state = 0; 
     }
 
     bool is_available() const noexcept { return obj->state == 1; }
+
     bool is_closed() const noexcept { return obj->state == 0; }
+
     void close() const noexcept { free(); }
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class decoder_t {
+namespace nodepp { class base58_decoder_t {
 protected:
-    struct NODE {
-        string_t chr; 
-        bool state = 0;
-        queue_t<string_t> bff;
-        mbedtls_mpi bn;
 
-        NODE() { mbedtls_mpi_init(&bn); }
-        ~NODE() { mbedtls_mpi_free(&bn); }
-    }; 
-    ptr_t<NODE> obj;
-
-    string_t decode(string_t msg) const noexcept {
-        if (msg.empty()) return nullptr;
-
-        mbedtls_mpi_lset(&obj->bn, 0);
-        
-        size_t lz   = 0; bool ch = true;
-        size_t base = obj->chr.size();
-
-        for(const auto& c : msg) {
-        if (ch && c == obj->chr[0]){ lz++; } else { ch = false; }
-
-            const char* pos = strchr(obj->chr.data(), c);
-            if( pos == nullptr ){ return nullptr; }
-            
-            size_t val = pos - obj->chr.data();
-
-            mbedtls_mpi_mul_int(&obj->bn, &obj->bn, base);
-            mbedtls_mpi_add_int(&obj->bn, &obj->bn, val);
-        }
-
-        size_t num_bytes = mbedtls_mpi_size(&obj->bn); 
-        ptr_t<uchar> tmp(lz + num_bytes, '\0');
-        
-        if( num_bytes > 0 ) 
-          { mbedtls_mpi_write_binary(&obj->bn, tmp.data() + lz, num_bytes); }
-
-        string_t out((char*)tmp.data(), tmp.size());
-        if( !onData.empty() ) { onData.emit(out); }
-
-        return out; 
-    }
+    struct NODE { queue_t<string_t> bff; bool state=0; }; ptr_t<NODE> obj;
 
 public:
-    event_t<string_t> onData;
-    event_t<>         onClose;
 
-    decoder_t(const string_t& chr) : obj(0UL, NODE()) { 
-        obj->state = 1; obj->chr = chr;
-    }
-    
-   ~decoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
+   ~base58_decoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
+    base58_decoder_t() : obj( new NODE() ) { obj->state = 1; }
 
-    void update(const string_t& msg) const noexcept { 
-        if(!obj->state){ return; } obj->bff.push(msg);
+    void update( const string_t& msg ) const noexcept { 
+         if( obj->state!=1 ){ return; } obj->bff.push( msg );
     }
 
-    string_t get() const noexcept { 
-        if( obj->state==0 ){ return nullptr; }
-        auto raw  = array_t<string_t>(obj->bff.data()).join(nullptr);
-        auto data = decode(raw); 
-        free(); return data; 
+    string_t get() const noexcept { if( obj->state == 0 ){ return nullptr; }
+        auto raw = string::join( obj->bff, "" );
+        auto data= encoder::base58::btoa( raw ); free(); return data; 
     }
 
     void free() const noexcept { 
-        if( obj->state==0 ){ return; } obj->state = 0;
-        onClose.emit(); onData.clear();
+        if( obj->state == 1 ){ return; } obj->state = 0;
     }
 
     bool is_available() const noexcept { return obj->state == 1; }
+
     bool is_closed() const noexcept { return obj->state == 0; }
+
     void close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class base64_encoder_t {
+namespace nodepp { class base64_encoder_t {
 protected:
 
     struct CTX {
@@ -576,7 +500,9 @@ public:
    ~base64_encoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
 
     base64_encoder_t() noexcept : obj( new NODE() ) {
-        obj->state = 1; obj->bff = ptr_t<char>( CHUNK_SIZE, '\0' );
+    NODEPP_CRYPTO_INITIALIZATOR();
+
+        obj->state = 1; obj->bff = ptr_t<char>( NODEPP_CHUNK_SIZE, '\0' );
 
         CTX item1; memset( &item1, 0, sizeof(CTX) );
             item1.pos1 = 0; item1.pos2 =-6; 
@@ -586,38 +512,49 @@ public:
     }
 
     void update( string_t msg ) const noexcept { 
-        if( !obj->state ){ return; } ulong chunk=0, /*--------*/ base=obj->bff.size();
-        while( chunk < msg.size() ){ string_t tmp = msg.slice_view( chunk, chunk + base );
-            string_t out; obj->ctx->len = 0; forEach ( x, tmp ) {
+        if( !obj->state ){ return; }
+        
+        ulong chunk = obj->bff.size();
+        
+        while( !msg.empty() ) { 
+            auto tmp = msg.slice_view( 0, chunk );
+            obj->ctx->len = 0; 
+        for  ( auto &x: tmp ) {
+                
+            obj->ctx->pos1 = ( obj->ctx->pos1 << 8 ) | (uint8_t)x; 
+            obj->ctx->pos2 += 8;
 
-                obj->ctx->pos1 = ( obj->ctx->pos1 << 8 ) + x; obj->ctx->pos2 += 8;
+            while ( obj->ctx->pos2 >= 0 ) { 
+                obj->bff[obj->ctx->len] = NODEPP_BASE64[(obj->ctx->pos1 >> obj->ctx->pos2) & 0x3F];
+                obj->ctx->pos2 -= 6; ++obj->ctx->len; 
+            }   obj->ctx->pos1 &= 0x3F; 
+        
+        } if ( obj->ctx->len > 0 ) {
+            
+            string_t out = string_t( &obj->bff, obj->ctx->len );
+            obj->ctx->size += obj->ctx->len;
+            if   ( onData.empty() ) { obj->buff.push( out ); } 
+            else { onData.emit( out ); }}
 
-                while ( obj->ctx->pos2 >= 0 ) { 
-                    obj->bff[obj->ctx->len] = CRYPTO_BASE64[(obj->ctx->pos1>>obj->ctx->pos2)&0x3F];
-                    obj->ctx->pos2 -= 6; ++obj->ctx->len;
-                }
+        msg.ptr().slice( chunk, (ulong) -1 ); }
 
-            }   obj->ctx->size += obj->ctx->len; out = string_t( &obj->bff, obj->ctx->len );
-
-            if ( obj->ctx->len == 0 ){ return; }
-            if ( onData.empty()     ){ obj->buff.push( out ); } else { onData.emit( out ); }
-        chunk += base; }
     }
 
     void free() const noexcept { if ( obj->state == 0 ){ return; } 
         string_t out; obj->state = 0; obj->ctx->len = 0;
 
         if( obj->ctx->pos2 > -6 ){ 
-            obj->bff[obj->ctx->len] = CRYPTO_BASE64[((obj->ctx->pos1<<8)>>(obj->ctx->pos2+8))&0x3F];
+            obj->bff[obj->ctx->len] = NODEPP_BASE64[((obj->ctx->pos1<<8)>>(obj->ctx->pos2+8))&0x3F];
             obj->ctx->len++; 
-        } while ( ( obj->ctx->len + obj->ctx->size ) % 4 ){ 
+        } while ( ( obj->ctx->len + obj->ctx->size ) % 4 ) { 
             obj->bff[obj->ctx->len] = '='; 
             obj->ctx->len++;
         } 
 
         obj->ctx->size += obj->ctx->len; out = string_t( &obj->bff, obj->ctx->len );
         if ( onData.empty() ) { obj->buff.push( out ); } else { onData.emit(out); }
-             onClose.emit(); onData.clear();
+             
+        onClose.emit(); onData.clear(); onClose.clear();
     }
 
     string_t get() const noexcept { free(); return array_t<string_t>( obj->buff.data() ).join(nullptr); }
@@ -628,11 +565,11 @@ public:
 
     void close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class base64_decoder_t {
+namespace nodepp { class base64_decoder_t {
 protected:
 
     struct CTX {
@@ -657,7 +594,9 @@ public:
    ~base64_decoder_t() noexcept { if( obj.count()>1 ){ return; } free(); }
 
     base64_decoder_t() noexcept : obj( new NODE() ) {
-        obj->state = 1; obj->bff = ptr_t<char>( CHUNK_SIZE, '\0' );
+    NODEPP_CRYPTO_INITIALIZATOR();
+
+        obj->state = 1; obj->bff = ptr_t<char>( NODEPP_CHUNK_SIZE, '\0' );
 
         CTX item1; memset( &item1, 0, sizeof(CTX) );
             item1.pos1 = 0; item1.pos2 =-8; 
@@ -667,32 +606,36 @@ public:
     }
 
     void update( string_t msg ) const noexcept { 
-        if( !obj->state ){ return; } ulong chunk=0, /*--------*/ base=obj->bff.size();
-        while( chunk < msg.size() ){ string_t tmp = msg.slice_view( chunk, chunk + base );
-        for  ( int x=0; x<64; x++ ){ obj->ctx->T[type::cast<int>(CRYPTO_BASE64[x])] =x; }
+        if( !obj->state ){ return; } ulong chunk = obj->bff.size();
 
-            string_t out; obj->ctx->len = 0; forEach ( x, tmp ) {
-                uint   y = type::cast<uint>(x);
+        while( !msg.empty() ){ auto tmp = msg.slice_view( 0, chunk );
+        type::fill( obj->ctx->T, obj->ctx->T+256, -1 ); string_t out; obj->ctx->len =0; 
+        for  ( int x=0; x<64; x++ ){ obj->ctx->T[type::cast<int>(NODEPP_BASE64[x])] =x; }
+        for  ( auto &x: tmp ) { 
+            
+            uint y = type::cast<uint>(x);
 
-                if( obj->ctx->T[y]==-1 ){ break; }
+            if( obj->ctx->T[y]==-1 ){ break; }
 
-                obj->ctx->pos1 = ( obj->ctx->pos1 << 6 ) + obj->ctx->T[y]; obj->ctx->pos2 += 6;
+            obj->ctx->pos1 = ( obj->ctx->pos1 << 6 ) + obj->ctx->T[y]; obj->ctx->pos2 += 6;
 
-                if( obj->ctx->pos2 >= 0 ) {
-                    obj->bff[obj->ctx->len] = char((obj->ctx->pos1>>obj->ctx->pos2)&0xFF);
-                    obj->ctx->pos2 -= 8; ++obj->ctx->len;
-                }
+            if( obj->ctx->pos2 >= 0 ) {
+                obj->bff[obj->ctx->len] = char((obj->ctx->pos1>>obj->ctx->pos2)&0xFF);
+                obj->ctx->pos2 -= 8; ++obj->ctx->len;
+            }
 
-            }   obj->ctx->size += obj->ctx->len; out = string_t( &obj->bff, obj->ctx->len );
+        }   obj->ctx->size += obj->ctx->len; out = string_t( &obj->bff, obj->ctx->len );
 
             if ( obj->ctx->len == 0 ){ return; }
             if ( onData.empty()     ){ obj->buff.push(out); } else { onData.emit( out ); }
-        chunk += base; }
+
+        msg.ptr().slice( chunk, (ulong) -1 ); }
     }
 
     void free() const noexcept { 
-    if( obj->state == 0 ){ return; } 
-        obj->state =  0; onClose.emit(); onData.clear();
+        if( obj->state == 0 ){ return; } obj->state = 0; 
+        onClose.emit (); onData.clear();
+        onClose.clear(); /*-----------*/
     }
 
     string_t get() const noexcept { free(); return array_t<string_t>( obj->buff.data() ).join(nullptr); }
@@ -703,11 +646,11 @@ public:
 
     void close() const noexcept { free(); } 
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-class rsa_t {
+namespace nodepp { class rsa_t {
 protected:
 
     static int PASS_CLB( void *data, size_t max_len, size_t *olen, void *p_ctx ) {
@@ -744,10 +687,11 @@ protected:
 
 public:
 
-    rsa_t() : obj(0UL, NODE()) {
+    rsa_t() : obj( new NODE() ) {
+    NODEPP_CRYPTO_INITIALIZATOR();
         if( mbedtls_ctr_drbg_seed(&obj->ctr_drbg, mbedtls_entropy_func, &obj->entropy, 
                                   (const uchar*)"rsa_t", 5)  !=0
-        ) { ARDUINO_ERROR("failed to seed RNG"); } obj->state=1;
+        ) { NODEPP_THROW_ERROR("failed to seed RNG"); } obj->state=1;
     }
 
    ~rsa_t() noexcept { if (obj.count() > 1) return; free(); }
@@ -766,59 +710,66 @@ public:
         int res = mbedtls_pk_parse_key(&obj->pk, (const uchar*)key.data(), key.size() + 1, 
                                        (const uchar*)pass, pass ? strlen(pass) : 0,
                                        mbedtls_ctr_drbg_random, &obj->ctr_drbg );
-        if( res != 0 ){ ARDUINO_ERROR("Invalid RSA Private Key"); }
+        if( res != 0 ){ NODEPP_THROW_ERROR("Invalid RSA Private Key"); }
         obj->bff.resize(mbedtls_pk_get_len(&obj->pk));
     }
 
     void read_public_key_from_memory( const string_t& key, const char* pass = NULL ) const {
         int res = mbedtls_pk_parse_public_key(&obj->pk, (const uchar*)key.data(), key.size() + 1);
-        if( res != 0 ){ ARDUINO_ERROR("Invalid RSA Public Key"); }
+        if( res != 0 ){ NODEPP_THROW_ERROR("Invalid RSA Public Key"); }
         obj->bff.resize(mbedtls_pk_get_len(&obj->pk));
     }
 
     string_t write_private_key_to_memory( const char* pass = NULL ) const { 
         ptr_t<char> out ( 16000UL, 0x00 ); 
         if( mbedtls_pk_write_key_pem( &obj->pk, (uchar*)out.get(), out.size() ) !=0 )
-          { ARDUINO_ERROR("Failed to write private key to PEM"); } return out;
+          { NODEPP_THROW_ERROR("Failed to write private key to PEM"); } return out;
     }
 
     string_t write_public_key_to_memory( const char* pass = NULL ) const {
         ptr_t<char> out ( 8000UL, 0x00 ); 
         if( mbedtls_pk_write_pubkey_pem( &obj->pk, (uchar*)out.get(), out.size() ) !=0 )
-          { ARDUINO_ERROR("Failed to write public key to PEM"); } return out;
+          { NODEPP_THROW_ERROR("Failed to write public key to PEM"); } return out;
     }
 
-    void read_private_key( const string_t& path, const char* pass=NULL ) const {
-        file_t fp( path, "r" ); read_private_key_from_memory( stream::await(fp), pass );
+    int read_private_key( const string_t& path, const char* pass=NULL ) const {
+        auto raw = fs::read_file( "path" ).await(); if( !raw ){ return -1; }
+        read_private_key_from_memory( raw.value(), pass ); return 1; 
+    }
+
+    int read_public_key( const string_t& path, const char* pass=NULL ) const {
+        auto raw = fs::read_file( "path" ).await(); if( !raw ){ return -1; }
+        read_public_key_from_memory( raw.value(), pass ); return 1; 
     }
 
     int write_private_key( const string_t& path, const char* pass=NULL ) const {
-        file_t fp( path, "w" ); return fp.write( write_private_key_to_memory( pass ) );
-    }
-
-    void read_public_key( const string_t& path, const char* pass=NULL ) const {
-        file_t fp( path, "r" ); read_public_key_from_memory( stream::await(fp), pass );
+        auto raw = fs::write_file( "path", write_private_key_to_memory( pass ) ).await(); 
+        if( !raw ){ return -1; } return 1;
     }
 
     int write_public_key( const string_t& path, const char* pass=NULL ) const {
-        file_t fp( path, "w" ); return fp.write( write_public_key_to_memory( pass ) );
+        auto raw = fs::write_file( "path", write_public_key_to_memory( pass ) ).await();
+        if( !raw ){ return -1; } return 1;
     }
 
     string_t public_encrypt( string_t msg ) const {
         if( msg.empty() || !obj->state ){ return nullptr; }
 
-        ulong chunk_size = mbedtls_pk_get_len(&obj->pk) - 11;
+        ulong chunk  = mbedtls_pk_get_len(&obj->pk) - 11;
         string_t data; size_t out_len;
 
         while( !msg.empty() ) {
-            string_t tmp = msg.splice(0, chunk_size);
+            
+            auto tmp = msg.slice_view( 0, chunk );
 
             if( mbedtls_pk_encrypt(&obj->pk, (const uchar*)tmp.data(), tmp.size(),
                                     obj->bff.get(), &out_len, obj->bff.size(),
                                     mbedtls_ctr_drbg_random, &obj->ctr_drbg) != 0
             ){ return nullptr; }
             
-            data += string_t((char*)obj->bff.get(), (ulong)out_len);
+            data  += string_t((char*)obj->bff.get(), (ulong)out_len); 
+            msg.ptr().slice( chunk, (ulong) -1 );
+
         }
 
         return data;
@@ -826,28 +777,34 @@ public:
 
     string_t private_decrypt(string_t msg) const {
         if( msg.empty() || !obj->state ){ return nullptr; }
-        
-        ulong block_size = mbedtls_pk_get_len(&obj->pk);
+
+        ulong chunk  = mbedtls_pk_get_len(&obj->pk);
         string_t data; size_t out_len;
 
-        while( !msg.empty() ) {
-            string_t tmp = msg.splice(0, block_size);
-        if( mbedtls_pk_decrypt(&obj->pk, (const uchar*)tmp.data(), tmp.size(),
-                                obj->bff.get(), &out_len, obj->bff.size(),
-                                mbedtls_ctr_drbg_random, &obj->ctr_drbg) != 0
-        ) { return nullptr; } data += string_t((char*)obj->bff.get(), (ulong)out_len); }
+        while( !msg.empty() ) { 
+            
+            auto tmp = msg.slice_view( 0, chunk );
 
+            if( mbedtls_pk_decrypt(&obj->pk, (const uchar*)tmp.data(), tmp.size(),
+                                    obj->bff.get(), &out_len, obj->bff.size(),
+                                    mbedtls_ctr_drbg_random, &obj->ctr_drbg) != 0
+            ) { return nullptr; } 
+        
+            data  += string_t((char*)obj->bff.get(), (ulong)out_len); 
+            msg.ptr().slice( chunk, (ulong) -1 );
+
+        }   
+        
         return data;
     }
 
     void free() const noexcept { if( obj->state == 0 ){ return; } obj->state = 0; }
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-
-class ec_t {
+namespace nodepp { class ec_t {
 protected:
 
     struct NODE {
@@ -865,7 +822,7 @@ protected:
             mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, nullptr, 0);
         }
 
-        ~NODE() {
+       ~NODE() {
             mbedtls_ecp_keypair_free(&keypair);
             mbedtls_ctr_drbg_free(&ctr_drbg);
             mbedtls_entropy_free(&entropy);
@@ -877,7 +834,9 @@ public:
 
     template< class T >
     ec_t( const string_t& key, const T& type ) noexcept : obj( new NODE() ) {
-        if( key.empty() ){ ARDUINO_ERROR("can't initializate ec_t"); }
+    NODEPP_CRYPTO_INITIALIZATOR();
+
+        if( key.empty() ){ NODEPP_THROW_ERROR("can't initializate ec_t"); }
 
         if( mbedtls_ecp_group_load(&obj->keypair.grp, type) != 0 ) /*---*/ { return; }
         if( mbedtls_mpi_read_string(&obj->keypair.d, 16, key.data()) != 0 ){ return; }
@@ -891,6 +850,8 @@ public:
 
     template< class T >
     ec_t( const T& type ) noexcept : obj( new NODE() ) {
+    NODEPP_CRYPTO_INITIALIZATOR();
+    
         if( mbedtls_ecp_group_load(&obj->keypair.grp, type) != 0 ){ return; }
 
         if( mbedtls_ecp_gen_keypair(&obj->keypair.grp, &obj->keypair.d, 
@@ -913,7 +874,7 @@ public:
                                            format, &len, buffer, sizeof(buffer)) != 0 
         ) { return nullptr; }
         
-        return encoder::buffer::buff2hex({ (char*)buffer, (ulong)len });
+        return encoder::base16::atob({ (char*)buffer, (ulong)len });
     }
 
     string_t get_private_key() const noexcept {
@@ -930,11 +891,11 @@ public:
     bool is_closed()    const noexcept { return obj->state == 0; }
     void close()        const noexcept { free(); }
 
-};
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace crypto { namespace hash {
+namespace nodepp { namespace crypto { namespace hash {
 
     class MD5 : public hash_t { public:
         MD5() : hash_t( MBEDTLS_MD_MD5, 16 ) {}
@@ -972,11 +933,11 @@ namespace crypto { namespace hash {
         RIPEMD160() : hash_t( MBEDTLS_MD_RIPEMD160, 20 ) {}
     };
 
-}}
-    
-    /*─······································································─*/
+}}}
 
-namespace crypto { namespace hmac {
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { namespace crypto { namespace hmac {
 
     class MD5 : public hmac_t { public:
           MD5 ( const string_t& key ) : hmac_t( key, MBEDTLS_MD_MD5, 16 ) {}
@@ -1014,11 +975,11 @@ namespace crypto { namespace hmac {
           RIPEMD160( const string_t& key ) : hmac_t( key, MBEDTLS_MD_RIPEMD160, 20 ) {}
     }; 
 
-}}
-    
-    /*─······································································─*/
+}}}
 
-namespace crypto { namespace encrypt {
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { namespace crypto { namespace encrypt {
 
     class RSA : public rsa_t { public: template< class... T > 
           RSA ( const T&... args ) : rsa_t( args... ) {}
@@ -1078,11 +1039,11 @@ namespace crypto { namespace encrypt {
           TRIPLE_DES_ECB ( const T&... args ) : encrypt_t( args..., MBEDTLS_CIPHER_DES_EDE3_ECB ) {}
     };
 
-}}
-    
-    /*─······································································─*/
+}}}
 
-namespace crypto { namespace decrypt {
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { namespace crypto { namespace decrypt {
 
     class RSA : public rsa_t { public: template< class... T > 
           RSA ( const T&... args ) : rsa_t( args... ) {}
@@ -1142,63 +1103,39 @@ namespace crypto { namespace decrypt {
           TRIPLE_DES_ECB ( const T&... args ) : decrypt_t( args..., MBEDTLS_CIPHER_DES_EDE3_ECB ) {}
     };
 
-}}
-    
-    /*─······································································─*/
+}}}
 
-namespace crypto { namespace encoder {
+/*────────────────────────────────────────────────────────────────────────────*/
 
-    class BASE58 : public encoder_t { public:
-          BASE58 () : encoder_t( "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" ) {}
-    };
+namespace nodepp { namespace crypto { namespace encoder {
 
-    class BASE16 : public encoder_t { public: 
-          BASE16 () : encoder_t( "123456789ABCDEF" ){}
-    };
-
-    class BASE8 : public encoder_t { public: 
-          BASE8 () : encoder_t( "1234567" ){}
-    };
-
-    class BASE4 : public encoder_t { public: 
-          BASE4 () : encoder_t( "123" ){}
+    class BASE58 : public base58_encoder_t { public:
+          BASE58 () : base58_encoder_t(){}
     };
 
     class BASE64 : public base64_encoder_t { public:
-          BASE64 () : base64_encoder_t() {}
+          BASE64 () : base64_encoder_t(){}
     };
 
 }}
-    
-    /*─······································································─*/
+
+/*────────────────────────────────────────────────────────────────────────────*/
 
 namespace crypto { namespace decoder {
 
-    class BASE58 : public decoder_t { public:
-          BASE58 () : decoder_t( "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" ) {}
-    };
-
-    class BASE16 : public decoder_t { public: 
-          BASE16 () : decoder_t( "123456789ABCDEF" ){}
-    };
-
-    class BASE8 : public decoder_t { public: 
-          BASE8 () : decoder_t( "1234567" ){}
-    };
-
-    class BASE4 : public decoder_t { public: 
-          BASE4 () : decoder_t( "123" ){}
+    class BASE58 : public base58_decoder_t { public:
+          BASE58 () : base58_decoder_t(){}
     };
 
     class BASE64 : public base64_decoder_t { public:
-          BASE64 () : base64_decoder_t() {}
+          BASE64 () : base64_decoder_t(){}
     };
 
-}}
-    
-    /*─······································································─*/
+}}}
 
-namespace crypto { namespace curve {
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { namespace crypto { namespace curve {
     
     class PRIME256V1 : public ec_t { public: template< class... T >
           PRIME256V1( const T&... args ) noexcept : ec_t( args..., MBEDTLS_ECP_DP_SECP256R1 ) {}
@@ -1212,11 +1149,12 @@ namespace crypto { namespace curve {
           SECP256K1( const T&... args ) noexcept : ec_t( args..., MBEDTLS_ECP_DP_SECP256K1 ) {}
     };
 
-}}
-  
-    /*─······································································─*/
+}}}
 
-}
+/*────────────────────────────────────────────────────────────────────────────*/
 
-#undef CRYPTO_BASE64
+#undef NODEPP_BASE58
+#undef NODEPP_BASE64
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/
