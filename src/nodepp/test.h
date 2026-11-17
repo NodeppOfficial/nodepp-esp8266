@@ -26,7 +26,7 @@ protected:
         string_t        name;
     };  
 
-    enum STATE {
+    enum STATE : uchar {
          TS_STATE_UNKNOWN = 0b00000000,
          TS_STATE_OPEN    = 0b00000001,
          TS_STATE_SKIP    = 0b00000010,
@@ -34,7 +34,7 @@ protected:
     };
     
     struct DONE {
-        queue_t<NODE> queue; int state = 0x01; 
+        queue_t<NODE> queue; uchar state = 0x01; 
     };  ptr_t<DONE> obj;
 
 public:
@@ -46,14 +46,18 @@ public:
 
     /*─······································································─*/
 
-   ~test_t() noexcept {
-        if( obj.count()> 1 ) /*---------------*/ { return; }
-        if( obj->state & STATE::TS_STATE_CLOSED ){ return; }
-        obj->state = STATE::TS_STATE_CLOSED; onClose.emit(); 
-    }
+   ~test_t() noexcept { if( obj.count()> 1 ){ return; } free(); }
 
     test_t() noexcept : obj( new DONE() ) { 
         auto self = type::bind( this );
+    }
+
+    /*─······································································─*/
+
+    void free() const noexcept {
+        if( obj->state & STATE::TS_STATE_CLOSED ){ return; }
+            obj->state = STATE::TS_STATE_CLOSED; 
+        onClose.emit(); onClose.clear();
     }
 
     /*─······································································─*/
@@ -86,23 +90,23 @@ public:
                 auto x = self->obj->queue.get();
             if( x==nullptr ){ break; }
 
-            conio::log("TEST:> "); conio::log( x->data.name );
             c = x->data.callback(); if ( c == 1 ){
-                conio::done( " PASSED\n" ); 
+                console::log( "TEST:>", x->data.name ," PASSED" ); 
                 self->onDone.emit();
             } elif ( c == -1 ) {
-                conio::error( " FAILED\n" ); 
+                console::log( "TEST:>", x->data.name ," FAILED" ); 
                 self->onFail.emit();
             } else {
-                conio::warn( " SKIPPED\n" ); 
+                console::log( "TEST:>", x->data.name ," SKIPPED" ); 
                 self->onSkip.emit();
             }
 
             } while(0);
 
-            if( self->obj->queue.get()==nullptr )/*--*/{ self->onClose.emit(); coEnd; } 
-            if( self->obj->queue.get()->next==nullptr ){ self->onClose.emit(); coEnd; } 
-                self->obj->queue.next();
+            do { auto  x =  self->obj->queue.get ();
+            if ( /*-*/ x == nullptr ){ self->free(); coEnd; } 
+            if ( x->next == nullptr ){ self->free(); coEnd; } 
+            } while(0); self->obj->queue.next();
               
         coGoto(1) ; coFinish
         }));
@@ -123,23 +127,23 @@ public:
                 auto x = self->obj->queue.get();
             if( x==nullptr ){ break; }
 
-            conio::log("TEST:> "); conio::log( x->data.name );
             c = x->data.callback(); if ( c == 1 ){
-                conio::done( " PASSED\n" ); 
+                console::log( "TEST:>", x->data.name ," PASSED" ); 
                 self->onDone.emit();
             } elif ( c == -1 ) {
-                conio::error( " FAILED\n" ); 
+                console::log( "TEST:>", x->data.name ," FAILED" ); 
                 self->onFail.emit();
             } else {
-                conio::warn( " SKIPPED\n" ); 
+                console::log( "TEST:>", x->data.name ," SKIPPED" ); 
                 self->onSkip.emit();
             }
 
             } while(0);
 
-            if( self->obj->queue.get()==nullptr )/*--*/{ self->onClose.emit(); coEnd; } 
-            if( self->obj->queue.get()->next==nullptr ){ self->onClose.emit(); coEnd; } 
-                self->obj->queue.next();
+            do { auto  x =  self->obj->queue.get ();
+            if ( /*-*/ x == nullptr ){ self->free(); coEnd; } 
+            if ( x->next == nullptr ){ self->free(); coEnd; } 
+            } while(0); self->obj->queue.next();
               
         coGoto(1) ; coFinish
         }));
@@ -181,3 +185,5 @@ public:
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

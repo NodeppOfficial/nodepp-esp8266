@@ -38,12 +38,12 @@ namespace nodepp { namespace console {
     
     /*─······································································─*/
 
-    inline void enable( uint port ){ switch( port ){
-		case 110  : case 300  : case 600   : case 1200 :
-        case 2400 : case 4800 : case 9600  : case 19200:
-		case 38400: case 57600: case 115200:
-        /*----*/ Serial.begin(port); break ;
-		default: Serial.begin(9600); break ;
+    inline void enable( ulong port ){ switch( port ){
+		case 110UL  : case 300UL  : case 600UL   : case 1200UL :
+        case 2400UL : case 4800UL : case 9600UL  : case 19200UL:
+		case 38400UL: case 57600UL: case 115200UL:
+        /*----*/ Serial.begin( port ); break ;
+		default: Serial.begin(9600UL); break ;
 	}}
     
     /*─······································································─*/

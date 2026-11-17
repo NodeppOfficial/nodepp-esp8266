@@ -12,33 +12,38 @@
 #ifndef NODEPP_OPTIONAL
 #define NODEPP_OPTIONAL
 
-#include "any.h"
+/*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { 
 template< class T > class optional_t {
-protected:
+protected: 
 
-    struct NODE { bool has; any_t data; }; ptr_t<NODE> obj;
+    ptr_t<T> val;
 
 public:
 
-    optional_t( const T& val ) noexcept : obj( new NODE() ) { obj->has = true ; obj->data = val; }
+    optional_t( const T& value ) noexcept { val=type::bind( value ); }
 
-    optional_t()  /*--------*/ noexcept : obj( new NODE() ) { obj->has = false; }
+    optional_t(        ) /*---*/ noexcept {}
 
-    optional_t( null_t ) /*-*/ noexcept : obj( new NODE() ) { obj->has = false; }
-
-    /*─······································································─*/
-
-    explicit operator bool(void) const noexcept { return has_value(); }
-    bool has_value() /*-------*/ const noexcept { return obj->has; }
+    optional_t( null_t ) /*---*/ noexcept {}
 
     /*─······································································─*/
 
-    T value() const { if ( !has_value() || !obj->data.has_value() ) {
-        ARDUINO_ERROR("Optional does not have a value");
-    }   return obj->data.template as<T>(); }
+    explicit operator bool(void) const noexcept { return !val.null(); }
+
+    bool has_value() /*-------*/ const noexcept { return !val.null(); }
+
+    /*─······································································─*/
+
+    T value() const { if( val.null() ){ 
+        NODEPP_THROW_ERROR("expected does not have a value"); 
+    } return *val; }
     
 };}
 
+/*────────────────────────────────────────────────────────────────────────────*/
+
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

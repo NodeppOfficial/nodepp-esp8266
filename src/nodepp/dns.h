@@ -14,13 +14,9 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#if _KERNEL_ == NODEPP_KERNEL_ARDUINO
-    #include "url.h"
-    #include "socket.h"
-    #include "arduino/dns.h"
-#else
-    #error "This OS Does not support dns.h"
-#endif
+#include "url.h"
+#include "socket.h"
+#include "arduino/dns.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

@@ -14,20 +14,13 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <typeinfo>
-#include <cstring>
-#include <cstdlib>
-#include <cstdio>
-#include <cmath>
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
 #include "macros.h"
 #include "task.h"
 #include "type.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#include "allocator.h"
 #include "ptr.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
@@ -35,32 +28,33 @@
 #include "iterator.h"
 #include "function.h"
 #include "queue.h"
-#include "probe.h"
-#include "memory.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "coroutine.h"
 #include "string.h"
 #include "array.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#include "initializer.h"
 #include "iterator.h"
+#include "encoder.h"
 #include "console.h"
 #include "sleep.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+#include "coroutine.h"
 #include "loop.h"
-#include "signal.h"
 #include "except.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include "query.h"
 #include "kernel.h"
+#include "os.h"
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #endif
+
+/*────────────────────────────────────────────────────────────────────────────*/

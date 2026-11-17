@@ -14,57 +14,57 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { class coroutine_t { 
+namespace nodepp { template< class... A > class coroutine_arg_t { 
 private:
 
-    using T = function_t<int,int&,ulong&>;
+    using T = function_t<int,uchar_64&,uchar_64&,A...>;
 
 protected:
 
     struct NODE {
-        T   callback; 
-        ulong time=0;
-        int state =0;
-        bool alive=1;
+        T        callback; 
+        uchar_64 time =0 ;
+        uchar_64 state=0 ;
     };  ptr_t<NODE> obj;
 
 public:
 
-    coroutine_t( T callback ) noexcept : obj( 0UL, NODE() ) { obj->callback = callback; }
-
-    coroutine_t() noexcept : obj( 0UL, NODE() ) { obj->alive = 0; }
-
-    /*─······································································─*/
-
-    void off() const noexcept { obj->alive = 0; obj->callback.free(); }
-
-    void set_state( int value ) const noexcept { obj->state = value; }
-
-    int get_state() const noexcept { return obj->state; }
-
-    void free() const noexcept { off(); }
+    template< class V >
+    coroutine_arg_t( const V& callback ) noexcept : obj( 0UL ) { obj->callback = callback; }
+    coroutine_arg_t() /*--------------*/ noexcept : obj( 0UL ) {}
 
     /*─······································································─*/
 
-    bool is_closed() const noexcept { return !is_available(); }
+    void set_state( uchar_64 value ) const noexcept { obj->state = value; }
 
-    bool is_available() const noexcept { return obj->alive; }
-    
-    /*─······································································─*/
+    uchar_64 get_state() const noexcept { return obj->state; }
 
-    coEmit() const { return next(); } int next() const {
-        if   ( !obj->alive ){ return -1; }
-        return  obj->callback( obj->state, obj->time );
+    uchar_64 get_delay() const noexcept {
+        if( obj->time>0 && obj->time>process::now() )
+          { return obj->time - process::now(); }
+            return 0ULL;
     }
 
-}; }
+    /*─······································································─*/
+
+    int operator()( const A&... args ) const {
+        if( get_delay()>0 ){ return 1; }
+        return obj->callback( obj->state, obj->time, args... );
+    }
+    
+    int emit( const A&... args ) const {
+        if( get_delay()>0 ){ return 1; }
+        return obj->callback( obj->state, obj->time, args... );
+    }
+
+};}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp    { 
-struct co_state_t   { uint   flag =0; ulong delay=0; int state=0; };
-struct generator_t  { ulong _time_=0; int _state_=0; };
-namespace coroutine { enum STATE {
+namespace nodepp    { using coroutine_t = coroutine_arg_t<>; 
+struct co_state_t   { uchar     flag =0; uchar_64  delay =0; int state=0; };
+struct generator_t  { uchar_64 _time_=0; uchar_64 _state_=0; };
+namespace coroutine { enum STATE : uchar {
      CO_STATE_START = 0b00000001,
      CO_STATE_YIELD = 0b00000010,
      CO_STATE_BLOCK = 0b00000000,
@@ -75,19 +75,27 @@ namespace coroutine { enum STATE {
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { namespace coroutine {
-    inline coroutine_t add( function_t<int,int&,ulong&> callback ) {
-    return coroutine_t( callback ); }
+
+    inline coroutine_t add( function_t<int, uchar_64&, uchar_64&> callback ) {
+        return coroutine_t( callback );
+    }
+
+    template< class... T, class V >
+    inline coroutine_arg_t<T...> add( V callback ) {
+        return coroutine_arg_t<T...>( callback );
+    }
+
 }}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { namespace coroutine {
-    inline co_state_t getno( int state=0, int _state_=0, ulong time=0 ){
+    inline co_state_t getno( int state=0, uchar_64 _state_=0, uchar_64 time=0 ){
     thread_local static co_state_t tmp; co_state_t out; 
     
-    memcpy( &out, &tmp, sizeof(co_state_t) ); tmp = co_state_t {};
+    out = tmp; tmp = co_state_t {};
 
-    tmp.state=_state_; if( time>0 ){ 
+    tmp.state=_state_ ; if( time>0 ){ 
         tmp.delay=time; /*------------*/
         tmp.flag =STATE::CO_STATE_DELAY; goto DONE; 
     } switch(state) {

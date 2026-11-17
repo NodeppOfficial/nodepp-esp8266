@@ -14,28 +14,35 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-#include <unistd.h>
-#include <cerrno>
-
-/*────────────────────────────────────────────────────────────────────────────*/
-
 namespace nodepp { namespace os {
-    
-    inline void exit( int err=0 ){ ::exit(err); }
 
+    inline uchar_64 rand() { 
+        /*-----------*/ uchar_64 msk = encoder::random::generate( process::now() );
+    thread_local static uchar_64 out = (uchar_64) &NODEPP_LOCAL_SHTDWN();
+        out = encoder::random::generate(out^ msk); return out; 
+    }
+    
     /*─······································································─*/
 
-    inline uint pid(){ return ::getpid(); }
+    inline bool is_little_endian(){
+        uchar_16 value = 0x01;
+        return ( (char*)&value )[0] == 0x01;
+    }
+
+    inline bool is_big_endian(){
+        uchar_16 value = 0x01;
+        return ( (char*)&value )[0] == 0x00;
+    }
     
     /*─······································································─*/
-
+    
     inline string_t tmp(){ return "/"; }
 
     inline string_t cwd(){ return "/"; }
 
-    /*─······································································─*/
+    inline uint    cpus(){ return   1; }
 
-    inline uint error(){ return errno; }
+    inline void   reset(){ NODEPP_RESET(); }
 
 }}
 

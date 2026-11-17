@@ -22,13 +22,9 @@ namespace nodepp {
 template< class T, class = typename type::enable_if<type::is_trivially_copyable<T>::value,T>::type >
 class atomic_t   { private: T value; protected: 
 
-    void cpy( const atomic_t& other ) noexcept { 
-         memcpy( &value, &other.value, sizeof( T ) );
-    }
+    void cpy( const atomic_t& other ) noexcept { memcpy ( &value, &other.value, sizeof( T ) ); }
 
-    void mve( atomic_t&& other )      noexcept { 
-         memmove( &value, &other.value, sizeof( T ) );
-    }
+    void mve( atomic_t&& other ) /**/ noexcept { memmove( &value, &other.value, sizeof( T ) ); }
 
 public:
 
@@ -144,6 +140,21 @@ public:
     explicit operator T() /**/ const noexcept { return get(); }
 
 }; }
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
+namespace nodepp { namespace atomic {
+
+    inline void acquire(){ __atomic_thread_fence( __ATOMIC_ACQUIRE ); }
+    inline void release(){ __atomic_thread_fence( __ATOMIC_RELEASE ); }
+    
+    template< class T, class... V >
+    void fence( const T& callback, V... args ){
+        acquire(); callback( args... );
+        release();
+    }
+
+}}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 

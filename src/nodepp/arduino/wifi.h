@@ -64,7 +64,7 @@ public:
         if( obj->state == 0 ){ return; } free();
     }
 
-    wifi_t() noexcept : obj( new NODE() ) {
+    wifi_t() noexcept : obj( 0UL ) {
         obj->state = STATE::WIFI_STATE_AVAILABLE;
         WiFi.persistent(false);
         WiFi.mode(WIFI_OFF);
